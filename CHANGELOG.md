@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.8.2
+
+- Switched HACS downloads to a versioned `aecc_battery.zip` release asset so
+  installations do not depend on default-branch archive discovery.
+- Added an automated tagged-release workflow that packages the integration
+  contents in the directory layout expected by HACS.
+
 ## 1.8.1
 
 - Added Octopus Agile as an explicit tariff option and made it the default for
