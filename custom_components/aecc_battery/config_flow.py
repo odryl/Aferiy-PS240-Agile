@@ -2,41 +2,49 @@
 
 from __future__ import annotations
 
-import logging
-import re
 import contextlib
+import logging
 import random
+import re
 import socket
 import struct
 import time
 from typing import Any
 
+import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
-import voluptuous as vol
 
 from .const import (
     CONF_ADVANCED_ENERGY_SENSORS,
+    CONF_AGILE_CURRENT_DAY_RATES_ENTITY,
+    CONF_AGILE_NEXT_DAY_RATES_ENTITY,
+    CONF_AGILE_PLANNER_ENABLED,
+    CONF_AGILE_PROTECTED_UNTIL,
+    CONF_AGILE_READY_BY,
     CONF_DEPENDENCY_HOME_OCCUPANCY,
     CONF_DEPENDENCY_SOLCAST,
-    CONF_OFF_PEAK_END,
-    CONF_OFF_PEAK_START,
-    CONF_TARIFF_PRESET,
     CONF_HOST,
     CONF_MANUFACTURER,
     CONF_MODEL,
     CONF_NAME,
+    CONF_OFF_PEAK_END,
+    CONF_OFF_PEAK_START,
     CONF_POLL_INTERVAL,
     CONF_PORT,
+    CONF_TARIFF_PRESET,
+    DEFAULT_AGILE_PLANNER_ENABLED,
+    DEFAULT_AGILE_PROTECTED_UNTIL,
+    DEFAULT_AGILE_READY_BY,
     DEFAULT_HOST,
     DEFAULT_MANUFACTURER,
     DEFAULT_MODEL,
     DEFAULT_NAME,
     DEFAULT_OFF_PEAK_END,
     DEFAULT_OFF_PEAK_START,
-    DEFAULT_TARIFF_PRESET,
     DEFAULT_PORT,
+    DEFAULT_TARIFF_PRESET,
     DOMAIN,
     MIN_POLL_INTERVAL,
     POLL_INTERVAL,
@@ -225,6 +233,21 @@ class AeccBatteryOptionsFlow(config_entries.OptionsFlow):
                 errors[CONF_OFF_PEAK_START] = "invalid_time"
             if not _TIME_RE.match(off_peak_end):
                 errors[CONF_OFF_PEAK_END] = "invalid_time"
+            agile_ready_by = user_input.get(CONF_AGILE_READY_BY, DEFAULT_AGILE_READY_BY).strip()
+            agile_protected_until = user_input.get(
+                CONF_AGILE_PROTECTED_UNTIL,
+                DEFAULT_AGILE_PROTECTED_UNTIL,
+            ).strip()
+            if not _TIME_RE.match(agile_ready_by):
+                errors[CONF_AGILE_READY_BY] = "invalid_time"
+            if not _TIME_RE.match(agile_protected_until):
+                errors[CONF_AGILE_PROTECTED_UNTIL] = "invalid_time"
+            if (
+                _TIME_RE.match(agile_ready_by)
+                and _TIME_RE.match(agile_protected_until)
+                and agile_ready_by >= agile_protected_until
+            ):
+                errors[CONF_AGILE_PROTECTED_UNTIL] = "invalid_agile_window"
             if errors:
                 return self.async_show_form(
                     step_id="init",
@@ -238,6 +261,20 @@ class AeccBatteryOptionsFlow(config_entries.OptionsFlow):
                 CONF_TARIFF_PRESET: tariff_preset,
                 CONF_OFF_PEAK_START: off_peak_start,
                 CONF_OFF_PEAK_END: off_peak_end,
+                CONF_AGILE_PLANNER_ENABLED: user_input.get(
+                    CONF_AGILE_PLANNER_ENABLED,
+                    DEFAULT_AGILE_PLANNER_ENABLED,
+                ),
+                CONF_AGILE_CURRENT_DAY_RATES_ENTITY: user_input.get(
+                    CONF_AGILE_CURRENT_DAY_RATES_ENTITY,
+                    "",
+                ),
+                CONF_AGILE_NEXT_DAY_RATES_ENTITY: user_input.get(
+                    CONF_AGILE_NEXT_DAY_RATES_ENTITY,
+                    "",
+                ),
+                CONF_AGILE_READY_BY: agile_ready_by,
+                CONF_AGILE_PROTECTED_UNTIL: agile_protected_until,
                 CONF_DEPENDENCY_SOLCAST: user_input.get(
                     _DEPENDENCY_SOLCAST_FIELD,
                     user_input.get(CONF_DEPENDENCY_SOLCAST, False),
@@ -301,6 +338,36 @@ class AeccBatteryOptionsFlow(config_entries.OptionsFlow):
                 ): _TARIFF_PRESET_SELECTOR,
                 vol.Optional(CONF_OFF_PEAK_START, default=off_peak_start): str,
                 vol.Optional(CONF_OFF_PEAK_END, default=off_peak_end): str,
+                vol.Optional(
+                    CONF_AGILE_PLANNER_ENABLED,
+                    default=source.get(
+                        CONF_AGILE_PLANNER_ENABLED,
+                        DEFAULT_AGILE_PLANNER_ENABLED,
+                    ),
+                ): bool,
+                vol.Optional(
+                    CONF_AGILE_CURRENT_DAY_RATES_ENTITY,
+                    description={"suggested_value": source.get(CONF_AGILE_CURRENT_DAY_RATES_ENTITY, "")},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="event")
+                ),
+                vol.Optional(
+                    CONF_AGILE_NEXT_DAY_RATES_ENTITY,
+                    description={"suggested_value": source.get(CONF_AGILE_NEXT_DAY_RATES_ENTITY, "")},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="event")
+                ),
+                vol.Optional(
+                    CONF_AGILE_READY_BY,
+                    default=source.get(CONF_AGILE_READY_BY, DEFAULT_AGILE_READY_BY),
+                ): str,
+                vol.Optional(
+                    CONF_AGILE_PROTECTED_UNTIL,
+                    default=source.get(
+                        CONF_AGILE_PROTECTED_UNTIL,
+                        DEFAULT_AGILE_PROTECTED_UNTIL,
+                    ),
+                ): str,
                 vol.Optional(
                     _DEPENDENCY_SOLCAST_FIELD,
                     default=source.get(

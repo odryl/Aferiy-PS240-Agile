@@ -17,6 +17,11 @@ CONF_OFF_PEAK_END = "off_peak_end"
 CONF_OVERNIGHT_CHARGING_MODE = "overnight_charging_mode"
 CONF_DEPENDENCY_SOLCAST = "dependency_solcast_confirmed"
 CONF_DEPENDENCY_HOME_OCCUPANCY = "dependency_home_occupancy_confirmed"
+CONF_AGILE_PLANNER_ENABLED = "agile_planner_enabled"
+CONF_AGILE_CURRENT_DAY_RATES_ENTITY = "agile_current_day_rates_entity"
+CONF_AGILE_NEXT_DAY_RATES_ENTITY = "agile_next_day_rates_entity"
+CONF_AGILE_READY_BY = "agile_ready_by"
+CONF_AGILE_PROTECTED_UNTIL = "agile_protected_until"
 
 # Default connection values
 DEFAULT_HOST = "192.168.0.1"
@@ -32,6 +37,32 @@ OVERNIGHT_CHARGE_MODE_DISABLED = "disabled"
 OVERNIGHT_CHARGE_MODE_SMART = "smart"
 OVERNIGHT_CHARGE_MODE_MANUAL = "manual"
 DEFAULT_OVERNIGHT_CHARGE_MODE = OVERNIGHT_CHARGE_MODE_DISABLED
+DEFAULT_AGILE_PLANNER_ENABLED = True
+DEFAULT_AGILE_READY_BY = "16:00"
+DEFAULT_AGILE_PROTECTED_UNTIL = "22:00"
+
+# The PS240 system-level discharge ceiling confirmed for Agile planning. This
+# is deliberately independent of experimental per-register controls elsewhere.
+AGILE_MAX_SYSTEM_DISCHARGE_POWER_W = 800
+AGILE_MAX_SYSTEM_CHARGE_POWER_W = 800
+
+# Anonymized half-hour averages calculated from the installation's supplied
+# consumption history (55 complete summer days). Values are household kWh per
+# period and cap planned discharge to energy the home is likely to consume.
+AGILE_DEFAULT_DEMAND_PROFILE_KWH: dict[str, float] = {
+    "16:00": 0.310,
+    "16:30": 0.299,
+    "17:00": 0.329,
+    "17:30": 0.362,
+    "18:00": 0.505,
+    "18:30": 0.590,
+    "19:00": 0.675,
+    "19:30": 0.504,
+    "20:00": 0.408,
+    "20:30": 0.500,
+    "21:00": 0.547,
+    "21:30": 0.527,
+}
 OVERNIGHT_CHARGE_MODE_LABELS: dict[str, str] = {
     OVERNIGHT_CHARGE_MODE_SMART: "On",
     OVERNIGHT_CHARGE_MODE_DISABLED: "Off",

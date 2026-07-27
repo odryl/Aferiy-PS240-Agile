@@ -1,22 +1,22 @@
 {
   "domain": "aecc_battery",
-  "name": "AFERIY PS240 (Local)",
+  "name": "AFERIY PS240 Agile",
   "after_dependencies": [
     "energy",
     "http",
     "recorder"
   ],
   "codeowners": [
-    "@MortUK"
+    "@odryl"
   ],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/MortUK/Aferiy-PS240-Local-",
+  "documentation": "https://github.com/odryl/Aferiy-PS240-Agile",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/MortUK/Aferiy-PS240-Local-/issues",
+  "issue_tracker": "https://github.com/odryl/Aferiy-PS240-Agile/issues",
   "quality_scale": "bronze",
   "requirements": [],
-  "version": "1.7.8",
+  "version": "1.8.0",
   "zeroconf": [
     {
       "type": "_http._tcp.local.",

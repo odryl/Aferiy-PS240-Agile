@@ -1,16 +1,23 @@
-# AFERIY PS240 (Local)
+# AFERIY PS240 Agile
 
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.7.8-blue.svg)](CHANGELOG.md)
-[![HACS validation](https://github.com/MortUK/Aferiy-PS240-Local-/actions/workflows/hacs.yml/badge.svg)](https://github.com/MortUK/Aferiy-PS240-Local-/actions/workflows/hacs.yml)
-[![Hassfest validation](https://github.com/MortUK/Aferiy-PS240-Local-/actions/workflows/hassfest.yml/badge.svg)](https://github.com/MortUK/Aferiy-PS240-Local-/actions/workflows/hassfest.yml)
-[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-RichardOwen-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/richardowen)
+[![Version](https://img.shields.io/badge/version-v1.8.0-blue.svg)](CHANGELOG.md)
 
-Home Assistant custom integration for local TCP monitoring and control of an AFERIY PS240.
+Private Home Assistant fork combining local AFERIY PS240 monitoring with a
+safe, view-only Octopus Agile battery planner.
 
-This is a cleaned-up, AFERIY-focused fork of the AECC local TCP integration. It keeps the original `aecc_battery` integration domain so existing entities, dashboards, and automations do not need to be renamed.
+It is based on [MortUK/Aferiy-PS240-Local-](https://github.com/MortUK/Aferiy-PS240-Local-)
+and retains the `aecc_battery` integration domain, so existing entity IDs remain
+compatible. This fork appears in Home Assistant as **AFERIY PS240 Agile**.
+
+> [!IMPORTANT]
+> The Octopus Agile feature is currently **shadow mode only**. It proposes a
+> schedule but never sends Agile-driven commands to the battery. Existing
+> manual and Smart Overnight controls inherited from upstream can control the
+> battery independently, so leave Smart Overnight Charging **Off** during the
+> initial Agile trial unless you deliberately want to use it.
 
 ## Features
 
@@ -20,37 +27,58 @@ This is a cleaned-up, AFERIY-focused fork of the AECC local TCP integration. It 
 - Experimental Feed mode with a passive Base Feed Power target
 - Local-first automatic overnight charging with smart or manual SOC targets
 - Charge and discharge SOC limits
-- Charge power targets from 200 W to 1200 W, defaulting to 800 W on new installs
-- Discharge power targets from 800 W to 1200 W for cautious PS240 testing
+- Existing local manual controls inherited from the upstream integration
 - PV surplus charge trigger for systems with unmanaged microinverters
 - Physics-aware filtering for occasional invalid SOC/power readings
 - Home Assistant diagnostics export support
 - Custom AFERIY PS240 icon
 - Bundled AFERIY Overnight Plan dashboard card
+- View-only Octopus Agile Proposed Plans for today and tomorrow
+- Strict 800 W total-system Agile discharge ceiling (0.4 kWh per half-hour)
+- GBP/kWh profitability checks and malformed/stale tariff-data safeguards
+- Household-demand-aware planning based on an anonymized half-hour profile
 - Connection health and last-command result sensors
 - Grid meter agreement and charging reason diagnostics
 
-## Install With HACS
+## Before You Install
 
-[![Add to HACS via My Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MortUK&repository=Aferiy-PS240-Local-&category=Integration)
+You need:
+
+- Home Assistant 2024.8 or newer
+- HACS, unless installing manually
+- The static local IP address of the AFERIY master/coordinator
+- An Octopus Agile import tariff
+- [BottlecapDave's Octopus Energy integration](https://github.com/BottlecapDave/HomeAssistant-OctopusEnergy)
+  configured in Home Assistant
+
+Do not add executor/slave PS240 units separately. Add only the master unit.
+
+## Install This Private Repository With HACS
 
 1. Open HACS in Home Assistant.
-2. Go to Integrations.
-3. Open the three-dot menu and choose Custom repositories.
-4. Add this repository URL as an Integration.
-5. Search for `AFERIY PS240 (Local)` and install it.
-6. Restart Home Assistant.
+2. Select **Integrations**, open the three-dot menu, and choose **Custom repositories**.
+3. Add `https://github.com/odryl/Aferiy-PS240-Agile` with category **Integration**.
+4. Search for **AFERIY PS240 Agile** and install it.
+5. Restart Home Assistant.
+
+Because this repository is private, the GitHub account used by HACS must be
+able to access it. If the repository is not visible to HACS, use the manual
+installation below.
 
 ## Manual Install
 
-Copy `custom_components/aecc_battery` into your Home Assistant `config/custom_components/` folder, then restart Home Assistant.
+1. Download or clone this repository using a GitHub account with access.
+2. Copy `custom_components/aecc_battery` into Home Assistant's
+   `config/custom_components/` directory.
+3. Restart Home Assistant.
 
 ## Configuration
 
-1. In Home Assistant, go to Settings > Devices & services.
-2. Choose Add integration.
-3. Search for `AFERIY PS240 (Local)`.
-4. Enter the battery's local IP address, TCP port, and display name.
+1. Go to **Settings → Devices & services → Add integration**.
+2. Search for **AFERIY PS240 Agile**.
+3. Select the discovered master/coordinator or enter its static IP address.
+4. Keep the TCP port at `8080` unless the battery uses a different port.
+5. Complete setup and confirm that System Average Battery SOC updates.
 
 Use a static IP address or DHCP reservation for the battery so Home Assistant can always find it.
 
@@ -66,15 +94,103 @@ The integration creates generic `Battery 1 SOC`, `Battery 2 SOC`, and similar en
 
 After adding, removing, or replacing a battery/inverter, restart Home Assistant or reload the integration so the individual battery entity list is rebuilt from the master. The Battery Capacity preset does not control battery identification.
 
-## Options
+## Connect Octopus Agile
 
-Open the integration options to adjust:
+BottlecapDave's integration should provide event entities resembling:
 
-- Polling interval
-- Advanced energy estimate sensors
-- Off-peak tariff preset
-- Off-peak start and end times
-- External helper confirmations for advanced estimates
+```text
+event.octopus_energy_electricity_<SERIAL>_<MPAN>_current_day_rates
+event.octopus_energy_electricity_<SERIAL>_<MPAN>_next_day_rates
+```
+
+Then:
+
+1. Open **Settings → Devices & services**.
+2. Open the AFERIY integration and select **Configure**.
+3. Enable **Octopus Agile Proposed Plan**.
+4. Select the current-day and next-day **import** rate event entities. Explicit
+   selection is recommended even though a single import meter can be detected
+   automatically.
+5. Set **Battery ready by** to `16:00`.
+6. Set **Protect household demand until** to `22:00`.
+7. Save. The integration reloads automatically.
+
+Two sensors should appear:
+
+- **Agile Proposed Plan Today**
+- **Agile Proposed Plan Tomorrow**
+
+`Proposed` means a complete advisory plan is available. `Limited` means the
+battery cannot reach the target using the remaining periods. `Waiting for
+Rates` means Octopus has not supplied the required entity data. `Invalid`
+means the integration deliberately rejected stale, incomplete, non-Agile, or
+mismatched meter data; the sensor's `reason` attribute explains why.
+
+The plan aims for 100% SOC by 16:00, protects expected household demand until
+22:00, and only proposes discharge when the avoided import price exceeds the
+estimated delivered replacement cost by at least £0.03/kWh. The Agile ceiling
+is always **800 W for the whole battery system**, never per battery module.
+
+## Add the Proposed Plan Dashboard Card
+
+1. Go to **Settings → Dashboards → Resources**.
+2. Add `/aecc_battery_static/aferiy-agile-plan-card.js` as a **JavaScript module**.
+3. Refresh the browser.
+4. Add a Manual card to a dashboard:
+
+```yaml
+type: custom:aferiy-agile-plan-card
+```
+
+If more than one AFERIY integration entry exists, identify the two plan sensors
+explicitly:
+
+```yaml
+type: custom:aferiy-agile-plan-card
+today_entity: sensor.your_battery_agile_proposed_plan_today
+tomorrow_entity: sensor.your_battery_agile_proposed_plan_tomorrow
+```
+
+The card shows planned energy, average power, the 800 W ceiling, and duration
+for partial periods. Sensor attributes expose the complete validated timetable
+and an explicit `control_enabled: false` marker.
+
+## First-Day Verification
+
+Before relying on the displayed recommendation, check:
+
+- both plan sensors identify the expected MPAN and Agile tariff
+- Tomorrow changes from `Waiting for Rates` after Octopus publishes its prices
+- no proposed period exceeds 800 W or 0.4 kWh
+- the plan is ready by 16:00 and covers the 18:00-22:00 household peak
+- the battery itself remains unaffected when the Proposed Plan changes
+
+Keep shadow mode running for at least one to two weeks and compare proposed
+periods with actual SOC, import, solar and household demand before considering
+any separately reviewed automatic-control phase.
+
+## Troubleshooting Agile Setup
+
+- **Waiting for Rates:** verify BottlecapDave's current/next-day event entities
+  exist and are selected in the AFERIY options.
+- **Invalid – not owned by Octopus Energy:** select the original
+  `octopus_energy` event entity, not a template or copied sensor.
+- **Invalid – tariff is not Agile:** confirm the selected entities belong to
+  the Agile import agreement rather than export or a fixed tariff.
+- **Invalid – different MPAN/serial/tariff:** the current and next entities are
+  from different meters or agreements.
+- **Card not found:** restart Home Assistant, confirm the dashboard resource is
+  a JavaScript module, then hard-refresh the browser.
+- **More than one AFERIY system:** configure the card's two entity IDs explicitly.
+
+See [Octopus Agile implementation](docs/AGILE_IMPLEMENTATION.md) for the safety
+invariants and the gates required before any later automatic-control phase.
+
+## Other Integration Options
+
+The fork retains upstream options for polling, advanced energy estimates,
+fixed off-peak tariffs, Solcast, occupancy, manual controls, and Smart Overnight
+Charging. Those controls are independent of the Agile Proposed Plan.
 
 The device Configuration section also provides Overnight Charge mode, Manual SOC, Off-Peak Tariff, Off-Peak Start/End, Solar Availability, Overnight Status, and Recommended Overnight SOC. Battery Capacity is available when Advanced Energy Estimate Sensors is enabled.
 

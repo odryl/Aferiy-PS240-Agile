@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to AFERIY PS240 (Local)",
+        "title": "Connect to AFERIY PS240 Agile",
         "description": "Choose a discovered AECC/SXD device only if you have confirmed it is the master/coordinator, or enter the master's static IP manually. Executor units should not be added separately.",
         "data": {
           "master_device": "Master Device",
@@ -18,7 +18,7 @@
         }
       },
       "zeroconf_confirm": {
-        "title": "Discovered AFERIY PS240 (Local)",
+        "title": "Discovered AFERIY PS240 Agile",
         "description": "Home Assistant found a local AECC/SXD device at {discovered_host} ({discovered_serial}). Multi-unit systems may advertise the master and executor units separately. Configure only the master/coordinator unit. If this discovered device is not the master, replace the IP address with the master's static IP before continuing.",
         "data": {
           "host": "IP Address",
@@ -43,7 +43,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Reconfigure AFERIY PS240 (Local)",
+        "title": "Reconfigure AFERIY PS240 Agile",
         "description": "Update the connection details. Home Assistant will reconnect immediately.\n\nOptional helper checklist:",
         "data": {
           "host": "IP Address",
@@ -55,6 +55,11 @@
           "tariff_preset": "Off-peak tariff preset",
           "off_peak_start": "Off-peak start time",
           "off_peak_end": "Off-peak end time",
+          "agile_planner_enabled": "Octopus Agile Proposed Plan",
+          "agile_current_day_rates_entity": "Octopus current-day rates event",
+          "agile_next_day_rates_entity": "Octopus next-day rates event",
+          "agile_ready_by": "Battery ready by",
+          "agile_protected_until": "Protect household demand until",
           "dependency_solcast_confirmed": "1. Solcast installed",
           "dependency_home_occupancy_confirmed": "2. Home Occupancy enabled"
         },
@@ -64,6 +69,11 @@
           "tariff_preset": "Defaults to Intelligent Octopus Go. Named presets store their listed times automatically; choose custom to edit the times manually.",
           "off_peak_start": "Start of your cheap-rate charging window in 24-hour HH:MM format. Used only when the preset is custom.",
           "off_peak_end": "End of your cheap-rate charging window in 24-hour HH:MM format. Used only when the preset is custom.",
+          "agile_planner_enabled": "Creates view-only daily plans from Octopus Agile rates. It does not send battery commands.",
+          "agile_current_day_rates_entity": "BottlecapDave Octopus Energy current-day import rates event. Leave empty for safe automatic discovery when there is exactly one import meter.",
+          "agile_next_day_rates_entity": "BottlecapDave Octopus Energy next-day import rates event. Leave empty for safe automatic discovery when there is exactly one import meter.",
+          "agile_ready_by": "Target time for a full battery, normally 16:00 before the official Agile peak.",
+          "agile_protected_until": "End of the household protection window, normally 22:00 for evening usage.",
           "master_device": "Choose the master/coordinator, or leave as manual and enter the IP below. Executor units should not be selected.",
           "dependency_solcast_confirmed": "Tick once Solcast PV Forecast is installed. Used for timed solar forecasts and solar-aware estimates.",
           "dependency_home_occupancy_confirmed": "Tick once home occupancy is enabled. Uses Home Assistant's zone.home occupancy count so empty-house periods do not train the normal demand profile."
@@ -73,6 +83,7 @@
     "error": {
       "cannot_connect": "Cannot connect - check the IP, port, and that the battery is online.",
       "invalid_time": "Use 24-hour HH:MM format, for example 23:30 or 05:30.",
+      "invalid_agile_window": "The Agile protection end must be later than the ready-by time.",
       "unknown": "Unexpected error - see the Home Assistant log for details."
     }
   }

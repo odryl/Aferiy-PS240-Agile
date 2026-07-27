@@ -11,11 +11,20 @@ from collections import deque
 from datetime import UTC, datetime, timedelta
 from statistics import median
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import MATCH_ALL, PERCENTAGE, UnitOfEnergy, UnitOfPower
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import (
+    EVENT_STATE_CHANGED,
+    MATCH_ALL,
+    PERCENTAGE,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+    UnitOfEnergy,
+    UnitOfPower,
+)
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -23,10 +32,22 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util.dt import utcnow
 
+from .agile import build_agile_day_plan, validate_octopus_rate_source
 from .const import (
+    AGILE_DEFAULT_DEMAND_PROFILE_KWH,
+    AGILE_MAX_SYSTEM_CHARGE_POWER_W,
+    AGILE_MAX_SYSTEM_DISCHARGE_POWER_W,
+    CONF_AGILE_CURRENT_DAY_RATES_ENTITY,
+    CONF_AGILE_NEXT_DAY_RATES_ENTITY,
+    CONF_AGILE_PLANNER_ENABLED,
+    CONF_AGILE_PROTECTED_UNTIL,
+    CONF_AGILE_READY_BY,
     CONF_OFF_PEAK_END,
     CONF_OFF_PEAK_START,
     CONF_TARIFF_PRESET,
+    DEFAULT_AGILE_PLANNER_ENABLED,
+    DEFAULT_AGILE_PROTECTED_UNTIL,
+    DEFAULT_AGILE_READY_BY,
     DEFAULT_OFF_PEAK_END,
     DEFAULT_OFF_PEAK_START,
     DEFAULT_TARIFF_PRESET,
@@ -616,6 +637,8 @@ async def async_setup_entry(
     entities.append(AeccLastCommandResultSensor(coordinator, config_entry))
     entities.append(AeccAutomaticOvernightChargingStatusSensor(coordinator, config_entry))
     entities.append(AeccSmartHistorySensor(coordinator, config_entry))
+    entities.append(AeccAgileProposedPlanSensor(coordinator, config_entry, "current"))
+    entities.append(AeccAgileProposedPlanSensor(coordinator, config_entry, "next"))
 
     entities.append(AeccEstimatedHouseDemandSensor(coordinator, config_entry))
     entities.append(AeccHouseDemandEnergySensor(coordinator, config_entry))
@@ -626,6 +649,238 @@ async def async_setup_entry(
     entities.append(AeccWifiSignalSensor(coordinator, config_entry))
 
     async_add_entities(entities)
+
+
+class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccBatteryCoordinator], SensorEntity):
+    """View-only Agile plan rebuilt whenever BottlecapDave rate data changes."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:calendar-clock"
+
+    def __init__(
+        self,
+        coordinator: AeccBatteryCoordinator,
+        config_entry: ConfigEntry,
+        day_kind: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._config_entry = config_entry
+        self._day_kind = day_kind
+        label = "Today" if day_kind == "current" else "Tomorrow"
+        self._attr_name = f"Agile Proposed Plan {label}"
+        self._attr_unique_id = f"{config_entry.entry_id}_agile_proposed_plan_{day_kind}"
+        self._cached_plan_key: tuple[Any, ...] | None = None
+        self._cached_plan: dict[str, Any] | None = None
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return self.coordinator.device_info
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self.hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_rate_state_changed)
+        )
+
+    @callback
+    def _async_rate_state_changed(self, event: Event) -> None:
+        entity_id = str(event.data.get("entity_id") or "")
+        configured = self._configured_source_entity_id()
+        if entity_id == configured or (
+            not configured and entity_id.endswith(self._source_suffix())
+        ):
+            self._cached_plan_key = None
+            self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> str:
+        if not self._enabled:
+            return "Disabled"
+        plan = self._plan()
+        return str(plan.get("status", "waiting_for_rates")).replace("_", " ").title()
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        source = self._source_entity_id()
+        plan = self._plan()
+        return {
+            "source_entity": source,
+            "day": self._day_kind,
+            **plan,
+        }
+
+    @property
+    def _enabled(self) -> bool:
+        return bool(
+            self._config_entry.options.get(
+                CONF_AGILE_PLANNER_ENABLED,
+                DEFAULT_AGILE_PLANNER_ENABLED,
+            )
+        )
+
+    def _source_suffix(self) -> str:
+        return "_current_day_rates" if self._day_kind == "current" else "_next_day_rates"
+
+    def _configured_source_entity_id(self) -> str | None:
+        key = (
+            CONF_AGILE_CURRENT_DAY_RATES_ENTITY
+            if self._day_kind == "current"
+            else CONF_AGILE_NEXT_DAY_RATES_ENTITY
+        )
+        entity_id = str(self._config_entry.options.get(key) or "").strip()
+        return entity_id or None
+
+    def _source_entity_id(self) -> str | None:
+        configured = self._configured_source_entity_id()
+        if configured:
+            return configured
+        matches = sorted(
+            state.entity_id
+            for state in self.hass.states.async_all("event")
+            if state.entity_id.endswith(self._source_suffix())
+            and "_export_" not in state.entity_id
+        )
+        return matches[0] if len(matches) == 1 else None
+
+    def _counterpart_source_entity_id(self) -> str | None:
+        key = (
+            CONF_AGILE_NEXT_DAY_RATES_ENTITY
+            if self._day_kind == "current"
+            else CONF_AGILE_CURRENT_DAY_RATES_ENTITY
+        )
+        configured = str(self._config_entry.options.get(key) or "").strip()
+        if configured:
+            return configured
+        suffix = "_next_day_rates" if self._day_kind == "current" else "_current_day_rates"
+        matches = sorted(
+            state.entity_id
+            for state in self.hass.states.async_all("event")
+            if state.entity_id.endswith(suffix) and "_export_" not in state.entity_id
+        )
+        return matches[0] if len(matches) == 1 else None
+
+    @staticmethod
+    def _waiting_plan(reason: str) -> dict[str, Any]:
+        return {
+            "status": "waiting_for_rates",
+            "reason": reason,
+            "control_enabled": False,
+            "slots": [],
+        }
+
+    @staticmethod
+    def _invalid_plan(reason: str) -> dict[str, Any]:
+        return {
+            "status": "invalid",
+            "reason": reason,
+            "validation_errors": [reason],
+            "control_enabled": False,
+            "slots": [],
+        }
+
+    def _plan(self) -> dict[str, Any]:
+        if not self._enabled:
+            return {
+                "status": "disabled",
+                "reason": "Enable the Agile Proposed Plan in integration options.",
+                "control_enabled": False,
+                "slots": [],
+            }
+        source = self._source_entity_id()
+        if source is None:
+            return self._waiting_plan(
+                "Select the Octopus rate event entity in options, or ensure exactly one "
+                f"import entity ending {self._source_suffix()} exists."
+            )
+        state = self.hass.states.get(source)
+        if state is None:
+            return self._waiting_plan(f"The configured source {source} is unavailable.")
+        if state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            return self._waiting_plan(f"The configured source {source} has no usable state.")
+
+        now_utc = utcnow()
+        if now_utc - state.last_updated.astimezone(UTC) > timedelta(hours=36):
+            return self._invalid_plan(f"Rate data from {source} is more than 36 hours old.")
+
+        counterpart_id = self._counterpart_source_entity_id()
+        counterpart = self.hass.states.get(counterpart_id) if counterpart_id else None
+        registry_entry = er.async_get(self.hass).async_get(source)
+        source_errors = validate_octopus_rate_source(
+            source,
+            registry_entry.platform if registry_entry is not None else None,
+            state.attributes,
+            counterpart.attributes if counterpart is not None else None,
+        )
+        if source_errors:
+            return self._invalid_plan(" ".join(source_errors))
+
+        reserve_soc = float(getattr(self.coordinator, "_commanded_min_soc", 10))
+        starting_soc = reserve_soc
+        starting_soc_source = "conservative_reserve_assumption"
+        if self._day_kind == "current":
+            try:
+                live_soc = float(self.coordinator.get_value("average_battery_soc"))
+            except (TypeError, ValueError):
+                live_soc = None
+            if live_soc is not None and math.isfinite(live_soc):
+                starting_soc = live_soc
+                starting_soc_source = "live_system_average_battery_soc"
+
+        local_now = now_utc.astimezone(ZoneInfo(self.hass.config.time_zone))
+        expected_date = local_now.date() + timedelta(days=1 if self._day_kind == "next" else 0)
+        half_hour_bucket = now_utc.replace(
+            minute=(now_utc.minute // 30) * 30,
+            second=0,
+            microsecond=0,
+        )
+        cache_key = (
+            source,
+            state.last_updated,
+            round(starting_soc, 1),
+            round(reserve_soc, 1),
+            round(float(self.coordinator.battery_capacity_kwh), 3),
+            expected_date,
+            half_hour_bucket,
+            self._config_entry.options.get(CONF_AGILE_READY_BY, DEFAULT_AGILE_READY_BY),
+            self._config_entry.options.get(
+                CONF_AGILE_PROTECTED_UNTIL,
+                DEFAULT_AGILE_PROTECTED_UNTIL,
+            ),
+        )
+        if self._cached_plan_key == cache_key and self._cached_plan is not None:
+            return self._cached_plan
+
+        plan = build_agile_day_plan(
+            state.attributes.get("rates"),
+            timezone=self.hass.config.time_zone,
+            battery_capacity_kwh=self.coordinator.battery_capacity_kwh,
+            starting_soc=starting_soc,
+            reserve_soc=reserve_soc,
+            expected_date=expected_date,
+            now=now_utc,
+            demand_profile_kwh=AGILE_DEFAULT_DEMAND_PROFILE_KWH,
+            ready_by=self._config_entry.options.get(
+                CONF_AGILE_READY_BY,
+                DEFAULT_AGILE_READY_BY,
+            ),
+            protected_until=self._config_entry.options.get(
+                CONF_AGILE_PROTECTED_UNTIL,
+                DEFAULT_AGILE_PROTECTED_UNTIL,
+            ),
+            max_charge_power_w=AGILE_MAX_SYSTEM_CHARGE_POWER_W,
+            max_discharge_power_w=AGILE_MAX_SYSTEM_DISCHARGE_POWER_W,
+        )
+        plan["starting_soc_source"] = starting_soc_source
+        plan["tariff_code"] = state.attributes.get("tariff_code")
+        plan["mpan"] = state.attributes.get("mpan")
+        plan["rates_updated_at"] = state.last_updated.isoformat()
+        self._cached_plan_key = cache_key
+        self._cached_plan = plan
+        return plan
 
 
 class AeccSensor(CoordinatorEntity[AeccBatteryCoordinator], SensorEntity):

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.8.0
+
+- Added view-only Octopus Agile Proposed Plan sensors for today and tomorrow.
+- Added strict Octopus source, Agile tariff, meter, freshness, date, completeness,
+  DST and numeric validation.
+- Added household-demand-aware price optimization with a hard 800 W total-system
+  discharge ceiling and £0.03/kWh minimum estimated saving.
+- Added a bundled Agile Proposed Plan dashboard card with explicit partial-period
+  energy, average power, command ceiling and duration.
+- Added shadow-mode documentation and adversarial regression coverage. Agile
+  planning cannot write battery registers in this release.
+
 ## 1.7.8
 
 - Preserved the last confirmed complete battery topology when a local poll
