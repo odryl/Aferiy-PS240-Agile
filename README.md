@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.3-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.4-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe, view-only Octopus Agile battery planner.
@@ -131,25 +131,77 @@ The plan aims for 100% SOC by 16:00, protects expected household demand until
 estimated delivered replacement cost by at least £0.03/kWh. The Agile ceiling
 is always **800 W for the whole battery system**, never per battery module.
 
-## Add the Proposed Plan Dashboard Card
+## Create an Agile Dashboard
 
-1. Go to **Settings → Dashboards → Resources**.
-2. Add `/aecc_battery_static/aferiy-agile-plan-card.js` as a **JavaScript module**.
-3. Refresh the browser.
-4. Add a Manual card to a dashboard:
+After installing or updating the integration, restart Home Assistant before
+adding the dashboard so the bundled card file is available.
+
+### 1. Register the card resource
+
+1. Go to **Settings → Dashboards**.
+2. Open the top-right three-dot menu and select **Resources**.
+3. Select **Add resource**.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.4`.
+5. Select **JavaScript module** and save.
+6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
+
+If an older version of the resource already exists, edit its URL instead of
+adding a duplicate.
+
+### 2. Create a dedicated dashboard
+
+1. Go to **Settings → Dashboards** and select **Add dashboard**.
+2. Choose **New dashboard from scratch**.
+3. Suggested settings:
+   - Title: `AFERIY Energy`
+   - Icon: `mdi:battery-clock`
+   - Show in sidebar: enabled
+4. Open the new dashboard and select the edit/pencil button.
+5. If prompted, open the three-dot menu and select **Take control**.
+
+### 3. Add the Agile plan card
+
+1. While editing the dashboard, select **Add card**.
+2. Choose **By card** and search for **AFERIY Agile Battery Plan**.
+3. Add the card and save the dashboard.
+4. In a Sections dashboard, use the card's **Layout** tab to make it full
+   width.
+
+If the card is not listed, add a **Manual** card containing:
 
 ```yaml
 type: custom:aferiy-agile-plan-card
+title: Octopus Agile Battery Plan
 ```
 
-If more than one AFERIY integration entry exists, identify the two plan sensors
-explicitly:
+The card automatically finds the plan sensors when there is only one AFERIY
+system. If more than one integration entry exists, identify them explicitly:
 
 ```yaml
 type: custom:aferiy-agile-plan-card
+title: Octopus Agile Battery Plan
 today_entity: sensor.your_battery_agile_proposed_plan_today
 tomorrow_entity: sensor.your_battery_agile_proposed_plan_tomorrow
 ```
+
+Find the exact entity IDs under **Developer Tools → States** by searching for
+`agile_proposed_plan`.
+
+### 4. Add live battery status (optional)
+
+Add an **Entities** or **Tile** card above the plan and select useful entities
+from the AFERIY device, such as:
+
+- System Average Battery SOC
+- Total Battery Output Power
+- AC Charging Power
+- Battery Discharging Power
+- Grid Import/Export
+- Connection Status
+
+The separate **AFERIY Overnight Plan** card describes the inherited
+fixed-window scheduler. Do not add it to the Agile dashboard unless you switch
+away from Octopus Agile and deliberately use a fixed-window tariff.
 
 The card provides separate Today and Tomorrow plans with:
 
@@ -164,6 +216,11 @@ The cost figures cover the planned battery actions and protected-window value;
 they are not a forecast of the household's complete electricity bill. Sensor
 attributes expose the complete validated timetable and an explicit
 `control_enabled: false` marker.
+
+If Home Assistant reports that the custom card does not exist, confirm the
+resource URL, restart Home Assistant, and hard-refresh the browser. If the card
+loads but shows `Waiting for Rates`, check the two Octopus rate event entities
+in the AFERIY integration options.
 
 ## First-Day Verification
 

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.8.4
+
+- Added an end-to-end README walkthrough for registering the Agile card,
+  creating a dedicated dashboard, adding the card visually or with YAML, and
+  selecting useful live battery entities.
+- Clarified browser caching, multiple-system entity selection and why the
+  fixed-window Overnight Plan card should not be used in Agile mode.
+
 ## 1.8.3
 
 - Expanded the Agile dashboard into a user-friendly Today/Tomorrow plan with
