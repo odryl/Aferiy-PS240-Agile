@@ -113,7 +113,15 @@ def test_rates_are_gbp_and_savings_are_not_divided_by_100() -> None:
     assert plan["rate_unit"] == "GBP/kWh"
     assert plan["average_planned_charge_rate_gbp_per_kwh"] < 0.10
     assert plan["estimated_net_saving_gbp"] > 1.0
+    assert plan["estimated_grid_charge_cost_gbp"] > 0
+    assert plan["estimated_avoided_import_cost_gbp"] > plan["estimated_discharge_replacement_cost_gbp"]
     assert all("rate_gbp_per_kwh" in slot for slot in plan["slots"])
+
+    charge_slots = [slot for slot in plan["slots"] if slot["action"] == "charge"]
+    discharge_slots = [slot for slot in plan["slots"] if slot["action"] == "discharge"]
+    assert all(slot["charge_cost_gbp"] > 0 for slot in charge_slots)
+    assert all(slot["avoided_import_cost_gbp"] > 0 for slot in discharge_slots)
+    assert all(slot["net_saving_gbp"] > 0 for slot in discharge_slots)
 
 
 def test_unprofitable_periods_are_not_discharged() -> None:

@@ -359,6 +359,17 @@ def build_agile_day_plan(
             if planned_energy_kwh > 0
             else 0
         )
+        charge_cost = (
+            rate.value_inc_vat * planned_energy_kwh if action == "charge" else 0.0
+        )
+        avoided_cost = (
+            rate.value_inc_vat * planned_energy_kwh if action == "discharge" else 0.0
+        )
+        slot_replacement_cost = (
+            delivered_replacement_cost * planned_energy_kwh
+            if action == "discharge" and delivered_replacement_cost is not None
+            else 0.0
+        )
         slots.append(
             {
                 "start": rate.start.isoformat(),
@@ -371,6 +382,13 @@ def build_agile_day_plan(
                 "duration_minutes": round(duration_minutes, 1),
                 "energy_kwh": round(planned_energy_kwh, 3),
                 "expected_house_load_kwh": round(expected_load(rate), 3),
+                "charge_cost_gbp": round(charge_cost, 4),
+                "avoided_import_cost_gbp": round(avoided_cost, 4),
+                "replacement_cost_gbp": round(slot_replacement_cost, 4),
+                "net_saving_gbp": round(
+                    max(0.0, avoided_cost - slot_replacement_cost),
+                    4,
+                ),
             }
         )
 
@@ -422,7 +440,14 @@ def build_agile_day_plan(
             else None
         ),
         "minimum_saving_gbp_per_kwh": round(minimum_saving, 5),
+        "estimated_grid_charge_cost_gbp": round(charge_cost_total, 2),
+        "estimated_avoided_import_cost_gbp": round(avoided_import_cost, 2),
+        "estimated_discharge_replacement_cost_gbp": round(replacement_cost, 2),
         "estimated_net_saving_gbp": round(estimated_net_saving, 2),
+        "cost_estimate_note": (
+            "Estimates cover planned grid charging and planned protected-window discharge, "
+            "not the household's complete daily electricity bill."
+        ),
         "validation_errors": [],
         "control_enabled": False,
         "slots": slots,

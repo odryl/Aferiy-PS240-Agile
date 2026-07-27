@@ -9,7 +9,7 @@ class AferiyAgilePlanCard extends HTMLElement {
   }
 
   getCardSize() {
-    return 8;
+    return 12;
   }
 
   _find(configured, entitySuffix, friendlyName) {
@@ -28,57 +28,131 @@ class AferiyAgilePlanCard extends HTMLElement {
     })[character]);
   }
 
+  _money(value, fallback = "—") {
+    const number = Number(value);
+    return Number.isFinite(number) ? `£${number.toFixed(2)}` : fallback;
+  }
+
+  _rate(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? `${(number * 100).toFixed(1)}p` : "—";
+  }
+
+  _number(value, suffix = "", digits = 1) {
+    const number = Number(value);
+    return Number.isFinite(number) ? `${number.toFixed(digits)}${suffix}` : "—";
+  }
+
+  _metric(label, value, tone = "") {
+    return `<div class="metric ${tone}"><span>${this._escape(label)}</span><strong>${this._escape(value)}</strong></div>`;
+  }
+
+  _slotValue(slot) {
+    if (slot.action === "charge") {
+      return `<span class="cost">Cost ${this._money(slot.charge_cost_gbp)}</span>`;
+    }
+    if (slot.action === "discharge") {
+      return `<span class="saving">Avoid ${this._money(slot.avoided_import_cost_gbp)}<br>
+        Save ${this._money(slot.net_saving_gbp)}</span>`;
+    }
+    return "";
+  }
+
+  _activeRows(slots) {
+    const active = slots.filter((slot) => slot.action !== "hold");
+    if (!active.length) return `<p class="empty">No charge or discharge periods are proposed.</p>`;
+    return `<div class="table-wrap"><table>
+      <thead><tr><th>Time</th><th>Plan</th><th>Agile price</th><th>Energy</th><th>Power</th><th>Cost/value</th></tr></thead>
+      <tbody>${active.map((slot) => `
+        <tr class="${this._escape(slot.action)}">
+          <td><strong>${this._escape(slot.local_start)}</strong></td>
+          <td><span class="action">${this._escape(slot.action)}</span></td>
+          <td>${this._rate(slot.rate_gbp_per_kwh)}/kWh</td>
+          <td>${this._number(slot.energy_kwh, " kWh", 3)}</td>
+          <td>${this._number(slot.power_w, " W", 0)} avg<br><small>≤${this._number(slot.command_power_limit_w, " W", 0)} · ${this._number(slot.duration_minutes, " min", 1)}</small></td>
+          <td>${this._slotValue(slot)}</td>
+        </tr>`).join("")}</tbody>
+    </table></div>`;
+  }
+
+  _rateTimeline(slots) {
+    if (!slots.length) return "";
+    return `<details><summary>All half-hour Agile prices</summary><div class="rates">
+      ${slots.map((slot) => `<div class="rate ${this._escape(slot.action)}" title="${this._escape(slot.action)}">
+        <span>${this._escape(slot.local_start)}</span><strong>${this._rate(slot.rate_gbp_per_kwh)}</strong>
+      </div>`).join("")}
+    </div></details>`;
+  }
+
   _day(state, label) {
-    if (!state) return `<section><h3>${label}</h3><p>Waiting for Proposed Plan sensor.</p></section>`;
+    if (!state) return `<section><h3>${label}</h3><p>Waiting for the Proposed Plan sensor.</p></section>`;
     const attrs = state.attributes || {};
-    const active = (attrs.slots || []).filter((slot) => slot.action !== "hold");
-    const rows = active.map((slot) => `
-      <tr class="${this._escape(slot.action)}">
-        <td>${this._escape(slot.local_start)}</td>
-        <td>${this._escape(slot.action)}</td>
-        <td>£${this._escape(slot.rate_gbp_per_kwh)}/kWh</td>
-        <td>${this._escape(slot.energy_kwh)} kWh · ${this._escape(slot.power_w)} W avg<br>
-          ≤${this._escape(slot.command_power_limit_w)} W for ${this._escape(slot.duration_minutes)} min</td>
-      </tr>`).join("");
+    const slots = attrs.slots || [];
+    const statusClass = String(attrs.status || state.state).toLowerCase().replaceAll("_", "-");
+    const conservativeTomorrow = attrs.starting_soc_source === "conservative_reserve_assumption";
     return `<section>
-      <div class="heading"><h3>${label} · ${this._escape(attrs.date || "Waiting")}</h3>
-        <span>${this._escape(state.state)}</span></div>
-      <p>${this._escape(attrs.reason)}</p>
-      <div class="metrics">
-        <b>${this._escape(attrs.planned_grid_charge_kwh ?? "—")} kWh charge</b>
-        <b>${this._escape(attrs.planned_discharge_kwh ?? "—")} kWh discharge</b>
-        <b>800 W discharge cap</b>
+      <div class="heading">
+        <div><h3>${this._escape(label)}</h3><span>${this._escape(attrs.date || "Waiting for rates")}</span></div>
+        <span class="status ${this._escape(statusClass)}">${this._escape(state.state)}</span>
       </div>
-      ${rows ? `<table><thead><tr><th>Time</th><th>Action</th><th>Rate</th><th>Planned energy and power</th></tr></thead><tbody>${rows}</tbody></table>` : ""}
+      <p class="reason">${this._escape(attrs.reason || "")}</p>
+      ${conservativeTomorrow ? `<p class="notice">Tomorrow assumes the battery starts at its reserve SOC; the plan will refine when it becomes Today.</p>` : ""}
+      <div class="metrics">
+        ${this._metric("Battery SOC", `${this._number(attrs.starting_soc, "%", 0)} → ${this._number(attrs.projected_soc_at_ready_by, "%", 0)}`, "soc")}
+        ${this._metric(`Grid charge by ${attrs.ready_by || "16:00"}`, this._number(attrs.planned_grid_charge_kwh, " kWh", 2), "charge")}
+        ${this._metric("Estimated charge cost", this._money(attrs.estimated_grid_charge_cost_gbp), "charge")}
+        ${this._metric(`Discharge to ${attrs.protected_until || "22:00"}`, this._number(attrs.planned_discharge_kwh, " kWh", 2), "discharge")}
+        ${this._metric("Peak import avoided", this._money(attrs.estimated_avoided_import_cost_gbp), "discharge")}
+        ${this._metric("Estimated net saving", this._money(attrs.estimated_net_saving_gbp), "saving")}
+      </div>
+      <div class="assumptions">
+        <span>Charge avg ${this._rate(attrs.average_planned_charge_rate_gbp_per_kwh)}/kWh</span>
+        <span>Discharged-energy replacement ${this._money(attrs.estimated_discharge_replacement_cost_gbp)} at ${this._rate(attrs.delivered_replacement_cost_gbp_per_kwh)}/kWh</span>
+        <span>Reserve ${this._number(attrs.reserve_soc, "%", 0)}</span>
+        <span>System limit ${this._number(attrs.max_system_discharge_power_w, " W", 0)}</span>
+      </div>
+      <h4>Charge and discharge schedule</h4>
+      ${this._activeRows(slots)}
+      ${this._rateTimeline(slots)}
+      <p class="footnote">${this._escape(attrs.cost_estimate_note || "Costs are estimates, not a complete electricity bill.")}</p>
     </section>`;
   }
 
   render() {
     if (!this._hass) return;
-    const today = this._find(
-      this.config.today_entity,
-      "_agile_proposed_plan_today",
-      "Agile Proposed Plan Today",
-    );
-    const tomorrow = this._find(
-      this.config.tomorrow_entity,
-      "_agile_proposed_plan_tomorrow",
-      "Agile Proposed Plan Tomorrow",
-    );
+    const today = this._find(this.config.today_entity, "_agile_proposed_plan_today", "Agile Proposed Plan Today");
+    const tomorrow = this._find(this.config.tomorrow_entity, "_agile_proposed_plan_tomorrow", "Agile Proposed Plan Tomorrow");
     this.innerHTML = `<ha-card>
       <style>
-        ha-card { padding: 14px; } h2, h3, p { margin: 0 0 9px; }
-        section { border-top: 1px solid var(--divider-color); padding-top: 12px; margin-top: 12px; }
-        .heading, .metrics { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
-        .heading span { color: var(--secondary-text-color); }
-        .metrics { margin: 8px 0; font-size: 12px; }
-        table { border-collapse: collapse; width: 100%; font-size: 12px; }
-        th, td { border-bottom: 1px solid var(--divider-color); padding: 6px; text-align: left; }
-        tr.charge td:nth-child(2) { color: #2196f3; font-weight: 700; }
-        tr.discharge td:nth-child(2) { color: #f57c00; font-weight: 700; }
+        ha-card { padding: 16px; overflow: hidden; }
+        h2, h3, h4, p { margin: 0; } h2 { font-size: 20px; } h3 { font-size: 18px; }
+        h4 { margin: 16px 0 8px; } section { border-top: 1px solid var(--divider-color); padding-top: 16px; margin-top: 16px; }
+        .subtitle, .reason, .footnote, .heading span, small { color: var(--secondary-text-color); }
+        .subtitle { margin-top: 4px; } .reason { margin-top: 10px; }
+        .heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+        .status { border-radius: 999px; background: var(--secondary-background-color); padding: 5px 9px; font-size: 12px; font-weight: 700; }
+        .status.proposed { color: var(--success-color, #2e7d32); } .status.invalid, .status.limited { color: var(--error-color, #c62828); }
+        .notice { margin-top: 10px; padding: 9px; border-left: 3px solid var(--warning-color, #f9a825); background: var(--secondary-background-color); font-size: 12px; }
+        .metrics { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 8px; margin: 14px 0 9px; }
+        .metric { background: var(--secondary-background-color); border-radius: 10px; padding: 10px; border-left: 3px solid var(--divider-color); }
+        .metric span { display: block; color: var(--secondary-text-color); font-size: 11px; margin-bottom: 4px; }
+        .metric strong { font-size: 17px; } .metric.charge { border-left-color: #2196f3; } .metric.discharge { border-left-color: #f57c00; }
+        .metric.saving { border-left-color: var(--success-color, #43a047); } .metric.soc { border-left-color: #7e57c2; }
+        .assumptions { display: flex; flex-wrap: wrap; gap: 6px; }
+        .assumptions span { border: 1px solid var(--divider-color); border-radius: 999px; padding: 4px 7px; font-size: 11px; }
+        .table-wrap { overflow-x: auto; } table { border-collapse: collapse; width: 100%; min-width: 650px; font-size: 12px; }
+        th, td { border-bottom: 1px solid var(--divider-color); padding: 8px 6px; text-align: left; vertical-align: top; }
+        .action { text-transform: capitalize; font-weight: 700; } tr.charge .action, .cost { color: #2196f3; } tr.discharge .action { color: #f57c00; }
+        .saving { color: var(--success-color, #43a047); font-weight: 700; } .empty { color: var(--secondary-text-color); padding: 8px 0; }
+        details { margin-top: 14px; } summary { cursor: pointer; font-weight: 600; }
+        .rates { display: grid; grid-template-columns: repeat(8, minmax(54px, 1fr)); gap: 4px; margin-top: 8px; }
+        .rate { background: var(--secondary-background-color); border-radius: 6px; padding: 5px; text-align: center; font-size: 10px; border-bottom: 3px solid transparent; }
+        .rate span, .rate strong { display: block; } .rate.charge { border-bottom-color: #2196f3; } .rate.discharge { border-bottom-color: #f57c00; }
+        .footnote { margin-top: 12px; font-size: 11px; }
+        @media (max-width: 700px) { .metrics { grid-template-columns: repeat(2, minmax(110px, 1fr)); } .rates { grid-template-columns: repeat(4, minmax(54px, 1fr)); } }
       </style>
-      <h2>${this._escape(this.config.title || "Octopus Agile Proposed Plan")}</h2>
-      <p>Shadow mode — this schedule cannot control the battery.</p>
+      <h2>${this._escape(this.config.title || "Octopus Agile Battery Plan")}</h2>
+      <p class="subtitle">Today and tomorrow · view-only shadow plan · no automatic battery commands</p>
       ${this._day(today, "Today")}
       ${this._day(tomorrow, "Tomorrow")}
     </ha-card>`;
@@ -89,6 +163,6 @@ customElements.define("aferiy-agile-plan-card", AferiyAgilePlanCard);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "aferiy-agile-plan-card",
-  name: "AFERIY Agile Proposed Plan",
-  description: "View today and tomorrow's shadow Octopus Agile battery plan.",
+  name: "AFERIY Agile Battery Plan",
+  description: "View today's and tomorrow's Octopus Agile charge, discharge and cost plan.",
 });

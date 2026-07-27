@@ -37,13 +37,17 @@ def test_agile_path_remains_shadow_only() -> None:
     assert "async_set_" not in agile_sensor
 
 
-def test_card_discovers_name_based_entity_ids_and_labels_gbp() -> None:
+def test_card_discovers_entities_and_exposes_energy_costs_and_savings() -> None:
     assert '"_agile_proposed_plan_today"' in CARD_SOURCE
     assert '"_agile_proposed_plan_tomorrow"' in CARD_SOURCE
     assert "slot.rate_gbp_per_kwh" in CARD_SOURCE
     assert "slot.energy_kwh" in CARD_SOURCE
     assert "slot.duration_minutes" in CARD_SOURCE
     assert "slot.command_power_limit_w" in CARD_SOURCE
-    assert "p/kWh" not in CARD_SOURCE
+    assert "estimated_grid_charge_cost_gbp" in CARD_SOURCE
+    assert "estimated_avoided_import_cost_gbp" in CARD_SOURCE
+    assert "estimated_discharge_replacement_cost_gbp" in CARD_SOURCE
+    assert "estimated_net_saving_gbp" in CARD_SOURCE
+    assert "All half-hour Agile prices" in CARD_SOURCE
     assert '"_agile_proposed_plan_current"' not in CARD_SOURCE
     assert '"_agile_proposed_plan_next"' not in CARD_SOURCE

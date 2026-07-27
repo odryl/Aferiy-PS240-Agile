@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 1.8.3
+
+- Expanded the Agile dashboard into a user-friendly Today/Tomorrow plan with
+  projected SOC, charge and discharge energy, estimated charge cost, avoided
+  peak import, replacement cost and net saving.
+- Added per-period cost, avoided import and saving attributes plus a collapsible
+  view of all half-hour Agile prices.
+- Kept every dashboard and planner output explicitly view-only.
+
 ## 1.8.2
 
 - Switched HACS downloads to a versioned `aecc_battery.zip` release asset so

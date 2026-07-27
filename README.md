@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.2-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.3-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe, view-only Octopus Agile battery planner.
@@ -151,9 +151,19 @@ today_entity: sensor.your_battery_agile_proposed_plan_today
 tomorrow_entity: sensor.your_battery_agile_proposed_plan_tomorrow
 ```
 
-The card shows planned energy, average power, the 800 W ceiling, and duration
-for partial periods. Sensor attributes expose the complete validated timetable
-and an explicit `control_enabled: false` marker.
+The card provides separate Today and Tomorrow plans with:
+
+- starting and projected ready-by SOC
+- planned grid-charge and protected-window discharge energy
+- estimated grid-charge cost, avoided peak import and net saving
+- the replacement cost assumed for discharged energy
+- half-hour action, price, energy, average power and partial-period duration
+- a collapsible view of all half-hour Agile prices
+
+The cost figures cover the planned battery actions and protected-window value;
+they are not a forecast of the household's complete electricity bill. Sensor
+attributes expose the complete validated timetable and an explicit
+`control_enabled: false` marker.
 
 ## First-Day Verification
 
