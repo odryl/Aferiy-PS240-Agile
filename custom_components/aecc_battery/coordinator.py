@@ -18,13 +18,13 @@ from homeassistant.util import dt as dt_util
 
 from .cleaners import CLEANERS, CleanerContext
 from .const import (
-    DEFAULT_CHARGE_POWER_W,
-    DEFAULT_BRAND_PROFILE,
     DEFAULT_BATTERY_CAPACITY_KWH,
+    DEFAULT_BRAND_PROFILE,
+    DEFAULT_CHARGE_POWER_W,
     DEFAULT_OFF_PEAK_END,
     DEFAULT_OFF_PEAK_START,
-    DEFAULT_TARIFF_PRESET,
     DEFAULT_OVERNIGHT_CHARGE_MODE,
+    DEFAULT_TARIFF_PRESET,
     DOMAIN,
     MAX_BATTERY_POWER_W,
     MAX_REGISTER_POWER_DEFAULT,
@@ -33,11 +33,15 @@ from .const import (
     MODE_DISABLED,
     MODE_REGISTERS,
     MODE_SELF_CONSUMPTION,
-    REG_BASE_DISCHARGE_ENABLE,
-    REG_BASE_DISCHARGE_POWER,
+    OCTOPUS_AGILE_TARIFF_PRESET,
+    OVERNIGHT_CHARGE_MODE_DISABLED,
+    OVERNIGHT_CHARGE_MODE_MANUAL,
+    OVERNIGHT_CHARGE_MODE_SMART,
     POLL_INTERVAL,
     REG_AI_SMART_CHARGE,
     REG_AI_SMART_DISC,
+    REG_BASE_DISCHARGE_ENABLE,
+    REG_BASE_DISCHARGE_POWER,
     REG_CONTROL_TIME1,
     REG_CUSTOM_MODE,
     REG_EMS_ENABLE,
@@ -47,9 +51,6 @@ from .const import (
     REG_SCHEDULE_MODE,
     REG_SURPLUS_CHARGE_TRIGGER,
     SLOT_DISABLED,
-    OVERNIGHT_CHARGE_MODE_DISABLED,
-    OVERNIGHT_CHARGE_MODE_MANUAL,
-    OVERNIGHT_CHARGE_MODE_SMART,
     TARIFF_PRESETS,
 )
 from .tcp_client import AeccTcpClient
@@ -1160,6 +1161,11 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if preset not in TARIFF_PRESETS:
             preset = DEFAULT_TARIFF_PRESET
         self.smart_tariff_preset = preset
+        if preset == OCTOPUS_AGILE_TARIFF_PRESET:
+            # Agile has no fixed cheap window. Preserve any custom times for a
+            # later tariff switch and force the legacy automatic scheduler off.
+            self.set_overnight_charging_mode(OVERNIGHT_CHARGE_MODE_DISABLED)
+            return
         if preset == "custom":
             self.set_off_peak_window(self.manual_off_peak_start, self.manual_off_peak_end)
             return
@@ -1196,6 +1202,29 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         current_soc = self._safe_float(self.get_value("average_battery_soc"))
         self._track_morning_accuracy(now)
         self._record_overnight_accuracy_if_due(now, window)
+        if self.smart_tariff_preset == OCTOPUS_AGILE_TARIFF_PRESET:
+            agile_attrs = {
+                "mode": mode,
+                "tariff_preset": self.smart_tariff_preset,
+                "dynamic_rates": True,
+                "planner_mode": "view_only",
+            }
+            self._reset_overnight_charge_confirmation()
+            if self._overnight_scheduler_started_charge:
+                await self._overnight_restore(
+                    self._overnight_last_window_key or window["key"],
+                    "Restoring Self-Gen",
+                    "Octopus Agile was selected; fixed-window Smart Overnight Charging is disabled.",
+                    agile_attrs,
+                )
+                return
+            self._clear_overnight_locked_target()
+            self._set_overnight_status(
+                "Agile planner only",
+                "The Agile Proposed Plan uses dynamic rates in view-only mode; no fixed-window charge command will be sent.",
+                agile_attrs,
+            )
+            return
         if mode == OVERNIGHT_CHARGE_MODE_DISABLED:
             self._set_overnight_off_status()
             return

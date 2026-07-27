@@ -32,7 +32,8 @@ DEFAULT_MODEL = "PS240"
 DEFAULT_TIMEOUT = 5  # seconds
 DEFAULT_OFF_PEAK_START = "23:30"
 DEFAULT_OFF_PEAK_END = "05:30"
-DEFAULT_TARIFF_PRESET = "octopus_intelligent_go"
+OCTOPUS_AGILE_TARIFF_PRESET = "octopus_agile"
+DEFAULT_TARIFF_PRESET = OCTOPUS_AGILE_TARIFF_PRESET
 OVERNIGHT_CHARGE_MODE_DISABLED = "disabled"
 OVERNIGHT_CHARGE_MODE_SMART = "smart"
 OVERNIGHT_CHARGE_MODE_MANUAL = "manual"
@@ -73,6 +74,9 @@ OVERNIGHT_CHARGE_MODE_FROM_LABEL: dict[str, str] = {
 }
 OVERNIGHT_CHARGE_MODE_FROM_LABEL["Disabled"] = OVERNIGHT_CHARGE_MODE_DISABLED
 TARIFF_PRESETS: dict[str, tuple[str, str]] = {
+    # Agile is dynamic: this compatibility window is never used by the fixed-
+    # window overnight scheduler, which is interlocked while Agile is selected.
+    OCTOPUS_AGILE_TARIFF_PRESET: (DEFAULT_OFF_PEAK_START, DEFAULT_OFF_PEAK_END),
     "snug_octopus": ("00:30", "06:30"),
     "octopus_intelligent_go": (DEFAULT_OFF_PEAK_START, DEFAULT_OFF_PEAK_END),
     "octopus_go": ("23:30", "05:30"),
@@ -87,6 +91,7 @@ TARIFF_PRESETS: dict[str, tuple[str, str]] = {
     "custom": (DEFAULT_OFF_PEAK_START, DEFAULT_OFF_PEAK_END),
 }
 TARIFF_PRESET_LABELS: dict[str, str] = {
+    OCTOPUS_AGILE_TARIFF_PRESET: "Octopus Agile (dynamic rates; Proposed Plan)",
     "snug_octopus": "Snug Octopus (00:30-06:30)",
     "octopus_intelligent_go": "Intelligent Octopus Go (23:30-05:30)",
     "octopus_go": "Octopus Go (23:30-05:30)",

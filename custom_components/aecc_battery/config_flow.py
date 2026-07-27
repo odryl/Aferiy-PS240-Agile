@@ -333,12 +333,6 @@ class AeccBatteryOptionsFlow(config_entries.OptionsFlow):
                     default=source.get(CONF_POLL_INTERVAL, POLL_INTERVAL),
                 ): vol.All(vol.Coerce(int), vol.Range(min=MIN_POLL_INTERVAL, max=300)),
                 vol.Optional(
-                    CONF_TARIFF_PRESET,
-                    default=tariff_preset,
-                ): _TARIFF_PRESET_SELECTOR,
-                vol.Optional(CONF_OFF_PEAK_START, default=off_peak_start): str,
-                vol.Optional(CONF_OFF_PEAK_END, default=off_peak_end): str,
-                vol.Optional(
                     CONF_AGILE_PLANNER_ENABLED,
                     default=source.get(
                         CONF_AGILE_PLANNER_ENABLED,
@@ -368,6 +362,12 @@ class AeccBatteryOptionsFlow(config_entries.OptionsFlow):
                         DEFAULT_AGILE_PROTECTED_UNTIL,
                     ),
                 ): str,
+                vol.Optional(
+                    CONF_TARIFF_PRESET,
+                    default=tariff_preset,
+                ): _TARIFF_PRESET_SELECTOR,
+                vol.Optional(CONF_OFF_PEAK_START, default=off_peak_start): str,
+                vol.Optional(CONF_OFF_PEAK_END, default=off_peak_end): str,
                 vol.Optional(
                     _DEPENDENCY_SOLCAST_FIELD,
                     default=source.get(

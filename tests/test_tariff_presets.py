@@ -5,9 +5,10 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CONST = ROOT / "custom_components" / "aecc_battery" / "const.py"
+COORDINATOR = ROOT / "custom_components" / "aecc_battery" / "coordinator.py"
+TIME_PLATFORM = ROOT / "custom_components" / "aecc_battery" / "time.py"
 
 
 def _constants() -> dict[str, object]:
@@ -39,6 +40,7 @@ def test_current_uk_tariff_windows() -> None:
     presets = _constants()["TARIFF_PRESETS"]
 
     assert presets == {
+        "octopus_agile": ("23:30", "05:30"),
         "snug_octopus": ("00:30", "06:30"),
         "octopus_intelligent_go": ("23:30", "05:30"),
         "octopus_go": ("23:30", "05:30"),
@@ -60,3 +62,24 @@ def test_tariff_labels_cover_every_preset() -> None:
     labels = constants["TARIFF_PRESET_LABELS"]
 
     assert labels.keys() == presets.keys()
+
+
+def test_octopus_agile_is_the_default_tariff() -> None:
+    constants = _constants()
+
+    assert constants["DEFAULT_TARIFF_PRESET"] == "octopus_agile"
+    assert next(iter(constants["TARIFF_PRESETS"])) == "octopus_agile"
+
+
+def test_agile_disables_fixed_window_overnight_scheduler() -> None:
+    source = COORDINATOR.read_text()
+
+    assert "if preset == OCTOPUS_AGILE_TARIFF_PRESET:" in source
+    assert "self.set_overnight_charging_mode(OVERNIGHT_CHARGE_MODE_DISABLED)" in source
+    assert "if self.smart_tariff_preset == OCTOPUS_AGILE_TARIFF_PRESET:" in source
+
+
+def test_manual_off_peak_controls_are_custom_only() -> None:
+    source = TIME_PLATFORM.read_text()
+
+    assert 'smart_tariff_preset", None) == "custom"' in source

@@ -80,7 +80,7 @@ class AeccSmartOffPeakTime(
 
     @property
     def available(self) -> bool:
-        return True
+        return getattr(self.coordinator, "smart_tariff_preset", None) == "custom"
 
     async def async_added_to_hass(self) -> None:
         """Restore manual custom time without forcing Custom mode at startup."""
@@ -123,7 +123,7 @@ class AeccSmartOffPeakTime(
 class AeccSmartOffPeakStartTime(AeccSmartOffPeakTime):
     """Manual off-peak start time for the Custom tariff preset."""
 
-    _attr_name = "Off-Peak Start"
+    _attr_name = "Custom Off-Peak Start"
     _attr_icon = "mdi:clock-start"
     coordinator_attr = "manual_off_peak_start"
     default_hhmm = DEFAULT_OFF_PEAK_START
@@ -136,7 +136,7 @@ class AeccSmartOffPeakStartTime(AeccSmartOffPeakTime):
 class AeccSmartOffPeakEndTime(AeccSmartOffPeakTime):
     """Manual off-peak end time for the Custom tariff preset."""
 
-    _attr_name = "Off-Peak End"
+    _attr_name = "Custom Off-Peak End"
     _attr_icon = "mdi:clock-end"
     coordinator_attr = "manual_off_peak_end"
     default_hhmm = DEFAULT_OFF_PEAK_END

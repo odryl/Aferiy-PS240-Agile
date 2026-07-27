@@ -16,20 +16,21 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     BATTERY_CAPACITY_PRESET_MODULE_COUNTS,
     CONF_ADVANCED_ENERGY_SENSORS,
+    CONF_TARIFF_PRESET,
     DEFAULT_BATTERY_CAPACITY_KWH,
     DEFAULT_CHARGE_POWER_W,
     DEFAULT_OFF_PEAK_END,
     DEFAULT_OFF_PEAK_START,
     DEFAULT_TARIFF_PRESET,
     DOMAIN,
-    CONF_TARIFF_PRESET,
-    MODE_CUSTOM,
-    MODE_SELF_CONSUMPTION,
     MAX_REGISTER_POWER_DEFAULT,
     MIN_CHARGE_POWER_W,
+    MODE_CUSTOM,
+    MODE_SELF_CONSUMPTION,
+    OCTOPUS_AGILE_TARIFF_PRESET,
+    OVERNIGHT_CHARGE_MODE_DISABLED,
     OVERNIGHT_CHARGE_MODE_FROM_LABEL,
     OVERNIGHT_CHARGE_MODE_LABELS,
-    OVERNIGHT_CHARGE_MODE_DISABLED,
     TARIFF_PRESET_LABELS,
     TARIFF_PRESETS,
     battery_capacity_for_modules,
@@ -47,6 +48,7 @@ CAPACITY_PRESET_OPTIONS = [
 ]
 OVERNIGHT_CHARGE_MODE_OPTIONS = list(OVERNIGHT_CHARGE_MODE_LABELS.values())
 TARIFF_PRESET_SHORT_LABELS = {
+    OCTOPUS_AGILE_TARIFF_PRESET: "Octopus Agile",
     "snug_octopus": "Snug Octopus",
     "octopus_intelligent_go": "Intelligent Octopus Go",
     "octopus_go": "Octopus Go",
@@ -434,7 +436,7 @@ class AeccSmartTariffPresetSelect(
 
     _attr_icon = "mdi:clock-star-four-points"
     _attr_has_entity_name = True
-    _attr_name = "Off-Peak Tariff"
+    _attr_name = "Energy Tariff"
     _attr_entity_category = EntityCategory.CONFIG
     _attr_options = TARIFF_PRESET_OPTIONS
 
@@ -498,6 +500,17 @@ class AeccSmartTariffPresetSelect(
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         preset = getattr(self.coordinator, "smart_tariff_preset", self._selected_preset)
+        if preset == OCTOPUS_AGILE_TARIFF_PRESET:
+            return {
+                "preset": preset,
+                "preset_label": TARIFF_PRESET_LABELS.get(preset),
+                "dynamic_rates": True,
+                "planner_mode": "view_only",
+                "note": (
+                    "The Agile Proposed Plan uses Octopus half-hourly rate events. "
+                    "Fixed-window Smart Overnight Charging is disabled."
+                ),
+            }
         start, end = self._window_for_preset(preset)
         return {
             "preset": preset,
@@ -521,6 +534,8 @@ class AeccSmartTariffPresetSelect(
         start, end = self._window_for_preset(preset)
         self._selected_preset = preset
         self.coordinator.set_smart_tariff_preset(preset)
+        if preset == OCTOPUS_AGILE_TARIFF_PRESET:
+            self.coordinator.set_overnight_charging_mode(OVERNIGHT_CHARGE_MODE_DISABLED)
         if preset == "custom":
             start, end = self._window_for_preset(preset)
             self.coordinator.set_off_peak_window(start, end)
@@ -530,6 +545,11 @@ class AeccSmartTariffPresetSelect(
             off_peak_end=end,
             manual_off_peak_start=getattr(self.coordinator, "manual_off_peak_start", start),
             manual_off_peak_end=getattr(self.coordinator, "manual_off_peak_end", end),
+            **(
+                {"overnight_charging_mode": OVERNIGHT_CHARGE_MODE_DISABLED}
+                if preset == OCTOPUS_AGILE_TARIFF_PRESET
+                else {}
+            ),
         )
         self.coordinator.async_set_updated_data(self.coordinator.data or {})
         self.async_write_ha_state()

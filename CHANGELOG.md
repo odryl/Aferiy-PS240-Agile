@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.8.1
+
+- Added Octopus Agile as an explicit tariff option and made it the default for
+  new or previously unset configurations.
+- Moved Agile rate inputs ahead of the legacy fixed-window tariff settings and
+  clarified which controls apply to each mode.
+- Disabled and safely interlocked fixed-window Smart Overnight Charging while
+  Octopus Agile is selected; the Agile Proposed Plan remains view-only.
+- Made Custom Off-Peak Start/End entities available only for the Custom tariff.
+
 ## 1.8.0
 
 - Added view-only Octopus Agile Proposed Plan sensors for today and tomorrow.

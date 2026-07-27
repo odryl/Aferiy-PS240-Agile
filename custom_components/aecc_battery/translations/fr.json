@@ -52,7 +52,7 @@
           "master_device": "Master Device",
           "advanced_energy_sensors": "Capteurs avancés d'estimation énergétique",
           "poll_interval": "Intervalle d'interrogation",
-          "tariff_preset": "Préréglage tarif heures creuses",
+          "tariff_preset": "Energy tariff (Agile or fixed-window)",
           "off_peak_start": "Début des heures creuses",
           "off_peak_end": "Fin des heures creuses",
           "dependency_solcast_confirmed": "1. Solcast installed",
@@ -61,7 +61,7 @@
         "data_description": {
           "advanced_energy_sensors": "Ajoute des capteurs d'estimation optionnels pouvant utiliser la prévision solaire, le tarif, l'occupation et la demande du foyer.",
           "poll_interval": "Fréquence d'interrogation locale de la batterie, en secondes.",
-          "tariff_preset": "Defaults to Intelligent Octopus Go. Named presets store their listed times automatically; choose custom to edit the times manually.",
+          "tariff_preset": "Defaults to Octopus Agile. Agile uses the current/next-day rate events and disables fixed-window Smart Overnight Charging.",
           "off_peak_start": "Start of your cheap-rate charging window in 24-hour HH:MM format. Used only when the preset is custom.",
           "off_peak_end": "End of your cheap-rate charging window in 24-hour HH:MM format. Used only when the preset is custom.",
           "master_device": "Choose the master/coordinator, or leave as manual and enter the IP below. Executor units should not be selected.",

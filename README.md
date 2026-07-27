@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.1-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe, view-only Octopus Agile battery planner.
@@ -192,20 +192,24 @@ The fork retains upstream options for polling, advanced energy estimates,
 fixed off-peak tariffs, Solcast, occupancy, manual controls, and Smart Overnight
 Charging. Those controls are independent of the Agile Proposed Plan.
 
-The device Configuration section also provides Overnight Charge mode, Manual SOC, Off-Peak Tariff, Off-Peak Start/End, Solar Availability, Overnight Status, and Recommended Overnight SOC. Battery Capacity is available when Advanced Energy Estimate Sensors is enabled.
+The device Configuration section also provides Overnight Charge mode, Manual SOC, Energy Tariff, Custom Off-Peak Start/End, Solar Availability, Overnight Status, and Recommended Overnight SOC. Battery Capacity is available when Advanced Energy Estimate Sensors is enabled.
 
 The advanced estimate sensors are disabled by default because they can depend on external Home Assistant entities such as grid meters, solar forecast data, or household demand history.
 
 Battery Capacity is an advanced estimate input selected in 1.958 kWh module steps. It is used by the charge and overnight energy calculations only. It does not limit the Battery N SOC sensors reported by the master.
 
-The off-peak window defaults to Intelligent Octopus Go, 23:30 to 05:30.
-Named presets are available for Snug Octopus, Intelligent Octopus Go,
+The Energy Tariff defaults to **Octopus Agile**. In Agile mode, the Proposed
+Plan uses the selected current-day and next-day Octopus rate events and the
+legacy fixed-window Smart Overnight scheduler is disabled. Custom Off-Peak
+Start/End controls are unavailable because those times do not apply to Agile.
+
+Fixed-window presets remain available for Snug Octopus, Intelligent Octopus Go,
 Octopus Go, EDF GoElectric 35, British Gas EV Power+, E.ON Next Drive,
 British Gas Standard E7, EDF E7 Fixed, OVO Simpler Energy E7, Octopus E7,
 and E.ON Next Pumped Fixed. If your tariff uses different cheap-rate hours,
 choose Custom and set the start and end times manually in 24-hour `HH:MM`
-format. These times are used by the overnight target and Pre-Sunrise Need
-calculations.
+format. These times are used only by the inherited fixed-window overnight target
+and Pre-Sunrise Need calculations.
 
 The external helper checkboxes are reminders for installers. They do not install or validate integrations. Smart estimates look for standard Solcast forecast files and sensors and use `zone.home` for home occupancy. Battery control and the overnight target use the configured tariff window and AECC grid reading; Shelly comparison remains diagnostic only.
 
