@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.10
+
+- Added an opt-in, persisted Self-Gen reconnect queue for manual use when the
+  PS240 Wi-Fi is unavailable. It holds one `Self-Gen/Zero Export` request for
+  60 minutes, waits for healthy/stable local polling after reconnect, sends it
+  once, and records the verified result.
+- New manual requests, queue disablement, and expiry cancel the pending action.
+  Charge, Discharge, Feed, and all Agile Proposed Plan actions are never queued.
+
 ## 1.8.9
 
 - Expanded Agile trial exports with battery SOC/capacity, charge/discharge,

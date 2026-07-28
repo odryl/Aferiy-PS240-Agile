@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.9-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.10-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe, view-only Octopus Agile battery planner.
@@ -38,6 +38,7 @@ compatible. This fork appears in Home Assistant as **AFERIY PS240 Agile**.
 - GBP/kWh profitability checks and malformed/stale tariff-data safeguards
 - Household-demand-aware planning based on an anonymized half-hour profile
 - Connection health and last-command result sensors
+- Optional one-hour manual Self-Gen restore queue for PS240 Wi-Fi outages
 - Grid meter agreement and charging reason diagnostics
 
 ## Before You Install
@@ -87,6 +88,18 @@ Use a static IP address or DHCP reservation for the battery so Home Assistant ca
 If you have more than one PS240 in the same AFERIY/AEC Cloud system, add only the master unit to this integration.
 
 The master controls the slave units. You do not need a separate local integration entry for each battery. In testing, one local connection to the master has been more reliable than trying to connect to every unit.
+
+### Queue Self-Gen after a Wi-Fi outage
+
+`Self-Gen Reconnect Queue` is a local configuration selector, under the device's
+configuration entities. Set it to `On (60 minutes)` before relying on it. If the
+PS240 Wi-Fi is down, selecting `Self-Gen/Zero Export` stores one request for up
+to 60 minutes. Once the integration has reconnected and received stable battery
+data, it sends the Self-Gen restore once and verifies the acknowledgement.
+
+Selecting any other manual operating mode cancels the queued request. The queue
+never replays Charge, Discharge or Feed, and it is completely separate from the
+view-only Agile Proposed Plan.
 
 System-level readings are reported through the master. System Average Battery SOC is the main multi-unit SOC source and matches the behaviour shown in the AEC Cloud app.
 
@@ -146,7 +159,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.9`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.10`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 

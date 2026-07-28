@@ -57,6 +57,7 @@ from .tcp_client import AeccTcpClient
 
 _LOGGER = logging.getLogger(__name__)
 _RUNTIME_CONFIG_STORAGE_VERSION = 1
+_SELF_GEN_RECONNECT_QUEUE_TTL = timedelta(minutes=60)
 _OVERNIGHT_ROLLING_RECHECK_MIN_INCREASE_SOC = 2
 _DUPLICATE_WRITE_SUPPRESS_SECONDS = 10
 _DUPLICATE_WRITE_PREFIXES = (
@@ -177,6 +178,11 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else None
         )
         self.runtime_preferences_loaded: bool = False
+        # This is intentionally limited to a manually requested Self-Gen
+        # restore.  It is never used by the Agile shadow planner or by any of
+        # the charge/discharge/feed commands.
+        self.self_gen_reconnect_queue_enabled: bool = False
+        self._pending_self_gen_reconnect: dict[str, str] | None = None
         self._manufacturer = manufacturer
         self._model = model
         self._consecutive_failures: int = 0
@@ -410,6 +416,7 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._last_good_data = raw
         await self._async_maybe_refresh_device_management()
+        await self._async_maybe_apply_pending_self_gen_reconnect()
         self._schedule_overnight_evaluation()
         return raw
 
@@ -500,6 +507,15 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
         self.solar_unavailable_override = bool(data.get("solar_unavailable_override", False))
+        self.self_gen_reconnect_queue_enabled = bool(
+            data.get("self_gen_reconnect_queue_enabled", False)
+        )
+        pending = data.get("pending_self_gen_reconnect")
+        if isinstance(pending, dict) and self._pending_self_gen_reconnect_is_valid(pending):
+            self._pending_self_gen_reconnect = {
+                "requested_at": str(pending["requested_at"]),
+                "expires_at": str(pending["expires_at"]),
+            }
         if self.overnight_charging_mode == OVERNIGHT_CHARGE_MODE_DISABLED:
             self._set_overnight_off_status()
 
@@ -526,12 +542,97 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "manual_off_peak_start": self.manual_off_peak_start,
             "manual_off_peak_end": self.manual_off_peak_end,
             "solar_unavailable_override": bool(self.solar_unavailable_override),
+            "self_gen_reconnect_queue_enabled": bool(self.self_gen_reconnect_queue_enabled),
+            "pending_self_gen_reconnect": self._pending_self_gen_reconnect,
         }
         data.update(updates)
         try:
             await self._runtime_store.async_save(data)
         except OSError as exc:
             _LOGGER.warning("Could not save AECC runtime config: %s", exc)
+
+    @staticmethod
+    def _pending_self_gen_reconnect_is_valid(pending: dict[str, Any]) -> bool:
+        """Return whether a stored reconnect request has a future expiry."""
+        requested_at = pending.get("requested_at")
+        expires_at = pending.get("expires_at")
+        if not isinstance(requested_at, str) or not isinstance(expires_at, str):
+            return False
+        try:
+            expires = datetime.fromisoformat(expires_at)
+        except ValueError:
+            return False
+        if expires.tzinfo is None:
+            return False
+        return expires > datetime.now(UTC)
+
+    @property
+    def pending_self_gen_reconnect(self) -> dict[str, str] | None:
+        """The one pending manual Self-Gen reconnect action, if any."""
+        if self._pending_self_gen_reconnect is None:
+            return None
+        return dict(self._pending_self_gen_reconnect)
+
+    async def async_set_self_gen_reconnect_queue_enabled(self, enabled: bool) -> None:
+        """Enable/disable the opt-in queue, cancelling a queue when disabled."""
+        self.self_gen_reconnect_queue_enabled = bool(enabled)
+        if not self.self_gen_reconnect_queue_enabled:
+            self._pending_self_gen_reconnect = None
+        await self.async_save_runtime_preferences()
+
+    async def async_queue_self_gen_on_reconnect(self) -> bool:
+        """Persist one manual Self-Gen request for a later successful poll."""
+        if not self.self_gen_reconnect_queue_enabled:
+            return False
+        now = datetime.now(UTC)
+        self._pending_self_gen_reconnect = {
+            "requested_at": now.isoformat(),
+            "expires_at": (now + _SELF_GEN_RECONNECT_QUEUE_TTL).isoformat(),
+        }
+        await self.async_save_runtime_preferences()
+        _LOGGER.warning(
+            "Queued manual Self-Gen/Zero Export restore until %s after battery reconnect",
+            self._pending_self_gen_reconnect["expires_at"],
+        )
+        return True
+
+    async def async_cancel_pending_self_gen_reconnect(self) -> None:
+        """Cancel a queued mode restore after any new manual mode request."""
+        if self._pending_self_gen_reconnect is None:
+            return
+        self._pending_self_gen_reconnect = None
+        await self.async_save_runtime_preferences()
+        _LOGGER.info("Cancelled pending Self-Gen/Zero Export reconnect restore")
+
+    async def _async_maybe_apply_pending_self_gen_reconnect(self) -> None:
+        """Apply the opt-in restore once a healthy poll has re-established contact."""
+        pending = self._pending_self_gen_reconnect
+        if pending is None:
+            return
+        if not self.self_gen_reconnect_queue_enabled:
+            await self.async_cancel_pending_self_gen_reconnect()
+            return
+        if not self._pending_self_gen_reconnect_is_valid(pending):
+            self._pending_self_gen_reconnect = None
+            await self.async_save_runtime_preferences()
+            _LOGGER.info("Expired pending Self-Gen/Zero Export reconnect restore")
+            return
+        # A valid energy poll has already completed.  Require the observed
+        # storage bank to be stable too, avoiding a command while a PS240 is
+        # still recovering and reporting a transient topology.
+        if self._storage_topology_stable_polls < 2:
+            return
+        _LOGGER.info("Applying queued manual Self-Gen/Zero Export restore after reconnect")
+        success = await self.async_set_work_mode(MODE_SELF_CONSUMPTION)
+        if not success:
+            _LOGGER.warning("Queued Self-Gen/Zero Export restore was not acknowledged; will retry before expiry")
+            return
+        self._commanded_direction = "Idle"
+        self._commanded_work_mode = MODE_SELF_CONSUMPTION
+        self.commanded_operating_mode = "Self-Gen/Zero Export"
+        self._pending_self_gen_reconnect = None
+        await self.async_save_runtime_preferences()
+        _LOGGER.info("Queued Self-Gen/Zero Export restore applied and verified")
 
     # ── Public access to commanded state (used by entity platforms) ──────────
 

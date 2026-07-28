@@ -46,6 +46,16 @@ def test_agile_path_remains_shadow_only() -> None:
     assert "async_set_" not in agile_sensor
 
 
+def test_self_gen_reconnect_queue_is_manual_only_and_not_an_agile_control_path() -> None:
+    assert "AeccSelfGenReconnectQueueSelect" in SELECT_SOURCE
+    assert '"On (60 minutes)"' in SELECT_SOURCE
+    assert "async_queue_self_gen_on_reconnect" in SELECT_SOURCE
+    assert "Charge, Discharge, Feed, and Agile Proposed Plans are never queued." in SELECT_SOURCE
+    assert "_SELF_GEN_RECONNECT_QUEUE_TTL = timedelta(minutes=60)" in (
+        ROOT / "custom_components" / "aecc_battery" / "coordinator.py"
+    ).read_text()
+
+
 def test_agile_planner_always_exposes_its_battery_capacity_setting() -> None:
     assert "CONF_AGILE_PLANNER_ENABLED" in SELECT_SOURCE
     assert "DEFAULT_AGILE_PLANNER_ENABLED" in SELECT_SOURCE
