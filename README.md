@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.6-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.7-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe, view-only Octopus Agile battery planner.
@@ -146,7 +146,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.6`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.7`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 
@@ -276,11 +276,11 @@ The fork retains upstream options for polling, advanced energy estimates,
 fixed off-peak tariffs, Solcast, occupancy, manual controls, and Smart Overnight
 Charging. Those controls are independent of the Agile Proposed Plan.
 
-The device Configuration section also provides Overnight Charge mode, Manual SOC, Energy Tariff, Custom Off-Peak Start/End, Solar Availability, Overnight Status, and Recommended Overnight SOC. Battery Capacity is available when Advanced Energy Estimate Sensors is enabled.
+The device Configuration section also provides Overnight Charge mode, Manual SOC, Energy Tariff, Custom Off-Peak Start/End, Solar Availability, Overnight Status, and Recommended Overnight SOC. Battery Capacity is always available while the Agile planner is enabled (and is also available when Advanced Energy Estimate Sensors is enabled).
 
 The advanced estimate sensors are disabled by default because they can depend on external Home Assistant entities such as grid meters, solar forecast data, or household demand history.
 
-Battery Capacity is an advanced estimate input selected in 1.958 kWh module steps. It is used by the charge and overnight energy calculations only. It does not limit the Battery N SOC sensors reported by the master.
+Battery Capacity is an estimate input selected in 1.958 kWh module steps. It is used by the Agile charge/discharge plan and overnight energy calculations only. It does not limit the Battery N SOC sensors reported by the master. Set it to the actual number of installed modules before relying on an Agile plan.
 
 The Energy Tariff defaults to **Octopus Agile**. In Agile mode, the Proposed
 Plan uses the selected current-day and next-day Octopus rate events and the

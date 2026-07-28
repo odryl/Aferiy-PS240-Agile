@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.7
+
+- Expose the Battery Capacity selector whenever the Agile planner is enabled,
+  instead of hiding this essential planning input behind Advanced Energy Estimate
+  Sensors.
+
 ## 1.8.6
 
 - Corrected actionable-rate validation for BottlecapDave's current-day Agile

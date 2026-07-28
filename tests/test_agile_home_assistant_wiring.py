@@ -13,6 +13,7 @@ CARD_SOURCE = (
     / "frontend"
     / "aferiy-agile-plan-card.js"
 ).read_text()
+SELECT_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "select.py").read_text()
 
 
 def test_sensor_applies_behavioral_source_validator_and_stale_guard() -> None:
@@ -42,6 +43,13 @@ def test_agile_path_remains_shadow_only() -> None:
     assert '"control_enabled": False' in agile_sensor
     assert "async_write_register" not in agile_sensor
     assert "async_set_" not in agile_sensor
+
+
+def test_agile_planner_always_exposes_its_battery_capacity_setting() -> None:
+    assert "CONF_AGILE_PLANNER_ENABLED" in SELECT_SOURCE
+    assert "DEFAULT_AGILE_PLANNER_ENABLED" in SELECT_SOURCE
+    assert "or config_entry.options.get(" in SELECT_SOURCE
+    assert "AeccBatteryCapacityPresetSelect" in SELECT_SOURCE
 
 
 def test_card_discovers_entities_and_exposes_energy_costs_and_savings() -> None:

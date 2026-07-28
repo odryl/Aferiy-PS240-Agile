@@ -16,7 +16,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     BATTERY_CAPACITY_PRESET_MODULE_COUNTS,
     CONF_ADVANCED_ENERGY_SENSORS,
+    CONF_AGILE_PLANNER_ENABLED,
     CONF_TARIFF_PRESET,
+    DEFAULT_AGILE_PLANNER_ENABLED,
     DEFAULT_BATTERY_CAPACITY_KWH,
     DEFAULT_CHARGE_POWER_W,
     DEFAULT_OFF_PEAK_END,
@@ -90,7 +92,13 @@ async def async_setup_entry(
         AeccSmartTariffPresetSelect(coordinator, config_entry),
         AeccSolarAvailabilitySelect(coordinator, config_entry),
     ]
-    if config_entry.options.get(CONF_ADVANCED_ENERGY_SENSORS, False):
+    if config_entry.options.get(
+        CONF_ADVANCED_ENERGY_SENSORS,
+        False,
+    ) or config_entry.options.get(
+        CONF_AGILE_PLANNER_ENABLED,
+        DEFAULT_AGILE_PLANNER_ENABLED,
+    ):
         entities.append(AeccBatteryCapacityPresetSelect(coordinator, config_entry))
     async_add_entities(entities)
 
