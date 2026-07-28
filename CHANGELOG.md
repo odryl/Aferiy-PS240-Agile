@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Added validated current and cheapest-remaining Agile price attributes to each
+  Proposed Plan, sourced from the same GBP/kWh rate list used by the planner.
+- Made the bundled Agile card visually actionable: it highlights the live,
+  cheapest and negative-price periods and uses configurable green/amber/red
+  price bands compatible with the familiar Octopus Energy Rates Card defaults.
+- Treat unpublished or empty Octopus day-rate events as `Waiting for Rates` and
+  avoid invalidating today's complete plan solely because tomorrow is not yet
+  published; meter/tariff matching still applies as soon as both lists exist.
+- Accept a partial current-day rate list when it omits only elapsed periods and
+  still covers every future actionable half-hour through midnight; gaps in
+  future coverage and incomplete next-day data remain invalid.
+
 ## 1.8.4
 
 - Added an end-to-end README walkthrough for registering the Agile card,

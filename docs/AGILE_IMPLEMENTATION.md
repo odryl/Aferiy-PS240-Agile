@@ -15,7 +15,8 @@ The planner enforces these invariants:
 - 100% target before 16:00 by default
 - price-aware protection from 16:00 to 22:00, capped by the anonymized half-hour household demand profile
 - discharge only when the avoided import rate exceeds delivered replacement cost by at least £0.03/kWh
-- exact expected-date and DST-aware consecutive rate coverage
+- exact expected-date and DST-aware consecutive coverage for every actionable
+  future period (elapsed current-day periods may be omitted by the source)
 - no selection of elapsed charging or discharging periods
 - malformed, overlapping, incomplete, or missing rate data cannot cause control
 - the source must be an entity owned by the Octopus Energy integration with

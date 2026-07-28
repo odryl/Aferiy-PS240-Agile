@@ -21,6 +21,13 @@ def test_sensor_applies_behavioral_source_validator_and_stale_guard() -> None:
     assert 'timedelta(hours=36)' in SENSOR_SOURCE
 
 
+def test_sensor_waits_for_unpublished_rate_events_without_invalidating_the_other_day() -> None:
+    assert 'raw_rates is None or raw_rates == []' in SENSOR_SOURCE
+    assert 'Octopus has not published {self._day_kind}-day rates' in SENSOR_SOURCE
+    assert 'counterpart_attributes = None' in SENSOR_SOURCE
+    assert 'and counterpart.attributes.get("rates")' in SENSOR_SOURCE
+
+
 def test_sensor_passes_expected_day_time_and_demand_profile_to_planner() -> None:
     assert "expected_date=expected_date" in SENSOR_SOURCE
     assert "now=now_utc" in SENSOR_SOURCE
@@ -48,6 +55,12 @@ def test_card_discovers_entities_and_exposes_energy_costs_and_savings() -> None:
     assert "estimated_avoided_import_cost_gbp" in CARD_SOURCE
     assert "estimated_discharge_replacement_cost_gbp" in CARD_SOURCE
     assert "estimated_net_saving_gbp" in CARD_SOURCE
+    assert "current_rate_gbp_per_kwh" in CARD_SOURCE
+    assert "lowest_future_rate_gbp_per_kwh" in CARD_SOURCE
+    assert "lowlimit" in CARD_SOURCE
+    assert "mediumlimit" in CARD_SOURCE
+    assert "highlimit" in CARD_SOURCE
+    assert "rate.current" in CARD_SOURCE
     assert "All half-hour Agile prices" in CARD_SOURCE
     assert '"_agile_proposed_plan_current"' not in CARD_SOURCE
     assert '"_agile_proposed_plan_next"' not in CARD_SOURCE

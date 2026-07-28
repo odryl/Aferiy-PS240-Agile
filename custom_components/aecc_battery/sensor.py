@@ -773,11 +773,14 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
         }
 
     @staticmethod
-    def _invalid_plan(reason: str) -> dict[str, Any]:
+    def _invalid_plan(
+        reason: str,
+        validation_errors: list[str] | None = None,
+    ) -> dict[str, Any]:
         return {
             "status": "invalid",
             "reason": reason,
-            "validation_errors": [reason],
+            "validation_errors": validation_errors or [reason],
             "control_enabled": False,
             "slots": [],
         }
@@ -802,21 +805,39 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
         if state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             return self._waiting_plan(f"The configured source {source} has no usable state.")
 
+        raw_rates = state.attributes.get("rates")
+        if raw_rates is None or raw_rates == []:
+            return self._waiting_plan(
+                f"Octopus has not published {self._day_kind}-day rates in {source} yet."
+            )
+        if not isinstance(raw_rates, list):
+            return self._invalid_plan(
+                f"The rates attribute on {source} is not a list.",
+            )
+
         now_utc = utcnow()
         if now_utc - state.last_updated.astimezone(UTC) > timedelta(hours=36):
             return self._invalid_plan(f"Rate data from {source} is more than 36 hours old.")
 
         counterpart_id = self._counterpart_source_entity_id()
         counterpart = self.hass.states.get(counterpart_id) if counterpart_id else None
+        counterpart_attributes = None
+        if (
+            counterpart is not None
+            and counterpart.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE)
+            and isinstance(counterpart.attributes.get("rates"), list)
+            and counterpart.attributes.get("rates")
+        ):
+            counterpart_attributes = counterpart.attributes
         registry_entry = er.async_get(self.hass).async_get(source)
         source_errors = validate_octopus_rate_source(
             source,
             registry_entry.platform if registry_entry is not None else None,
             state.attributes,
-            counterpart.attributes if counterpart is not None else None,
+            counterpart_attributes,
         )
         if source_errors:
-            return self._invalid_plan(" ".join(source_errors))
+            return self._invalid_plan(" ".join(source_errors), source_errors)
 
         reserve_soc = float(getattr(self.coordinator, "_commanded_min_soc", 10))
         starting_soc = reserve_soc
@@ -855,7 +876,7 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
             return self._cached_plan
 
         plan = build_agile_day_plan(
-            state.attributes.get("rates"),
+            raw_rates,
             timezone=self.hass.config.time_zone,
             battery_capacity_kwh=self.coordinator.battery_capacity_kwh,
             starting_soc=starting_soc,

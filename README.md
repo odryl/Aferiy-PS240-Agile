@@ -126,6 +126,11 @@ Rates` means Octopus has not supplied the required entity data. `Invalid`
 means the integration deliberately rejected stale, incomplete, non-Agile, or
 mismatched meter data; the sensor's `reason` attribute explains why.
 
+Before Octopus publishes tomorrow's prices, **Tomorrow** correctly stays at
+`Waiting for Rates`; it does not invalidate an otherwise complete **Today**
+plan. Once both rate events contain a published rate list, their MPAN, meter
+serial, and Agile tariff are compared before either plan uses the data.
+
 The plan aims for 100% SOC by 16:00, protects expected household demand until
 22:00, and only proposes discharge when the avoided import price exceeds the
 estimated delivered replacement cost by at least £0.03/kWh. The Agile ceiling
@@ -211,6 +216,18 @@ The card provides separate Today and Tomorrow plans with:
 - the replacement cost assumed for discharged energy
 - half-hour action, price, energy, average power and partial-period duration
 - a collapsible view of all half-hour Agile prices
+
+The price grid follows the same useful conventions as the Octopus Energy Rates
+card: the live period is outlined, the cheapest remaining period is highlighted,
+negative prices are blue, and increasing price bands progress from green through
+amber to red. The defaults are 5p, 20p and 30p/kWh; override them in the card
+YAML if they do not suit your household:
+
+```yaml
+lowlimit: 5
+mediumlimit: 20
+highlimit: 30
+```
 
 The cost figures cover the planned battery actions and protected-window value;
 they are not a forecast of the household's complete electricity bill. Sensor

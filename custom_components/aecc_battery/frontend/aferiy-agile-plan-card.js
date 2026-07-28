@@ -43,6 +43,28 @@ class AferiyAgilePlanCard extends HTMLElement {
     return Number.isFinite(number) ? `${number.toFixed(digits)}${suffix}` : "—";
   }
 
+  _priceLimit(name, fallback) {
+    const value = Number(this.config[name]);
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  _priceTone(rate, cheapestRate) {
+    const pence = Number(rate) * 100;
+    if (!Number.isFinite(pence)) return "unknown";
+    if (pence < 0) return "negative";
+    if (Number.isFinite(cheapestRate) && Math.abs(Number(rate) - cheapestRate) < 0.000001) return "cheapest";
+    if (pence > this._priceLimit("highlimit", 30)) return "high";
+    if (pence > this._priceLimit("mediumlimit", 20)) return "medium";
+    if (pence > this._priceLimit("lowlimit", 5)) return "low";
+    return "cheap";
+  }
+
+  _isCurrent(slot, now) {
+    const start = Date.parse(slot.start);
+    const end = Date.parse(slot.end);
+    return Number.isFinite(start) && Number.isFinite(end) && start <= now && now < end;
+  }
+
   _metric(label, value, tone = "") {
     return `<div class="metric ${tone}"><span>${this._escape(label)}</span><strong>${this._escape(value)}</strong></div>`;
   }
@@ -75,12 +97,18 @@ class AferiyAgilePlanCard extends HTMLElement {
     </table></div>`;
   }
 
-  _rateTimeline(slots) {
+  _rateTimeline(slots, cheapestRate) {
     if (!slots.length) return "";
+    const now = Date.now();
     return `<details><summary>All half-hour Agile prices</summary><div class="rates">
-      ${slots.map((slot) => `<div class="rate ${this._escape(slot.action)}" title="${this._escape(slot.action)}">
-        <span>${this._escape(slot.local_start)}</span><strong>${this._rate(slot.rate_gbp_per_kwh)}</strong>
-      </div>`).join("")}
+      ${slots.map((slot) => {
+        const current = this._isCurrent(slot, now);
+        const tone = this._priceTone(slot.rate_gbp_per_kwh, cheapestRate);
+        const title = `${slot.local_start}: ${this._rate(slot.rate_gbp_per_kwh)}/kWh · ${slot.action}${current ? " · current period" : ""}`;
+        return `<div class="rate ${this._escape(slot.action)} ${this._escape(tone)} ${current ? "current" : ""}" title="${this._escape(title)}">
+        <span>${current ? "Now · " : ""}${this._escape(slot.local_start)}</span><strong>${this._rate(slot.rate_gbp_per_kwh)}</strong>
+      </div>`;
+      }).join("")}
     </div></details>`;
   }
 
@@ -90,6 +118,9 @@ class AferiyAgilePlanCard extends HTMLElement {
     const slots = attrs.slots || [];
     const statusClass = String(attrs.status || state.state).toLowerCase().replaceAll("_", "-");
     const conservativeTomorrow = attrs.starting_soc_source === "conservative_reserve_assumption";
+    const cheapestRate = Number(attrs.lowest_future_rate_gbp_per_kwh);
+    const currentRate = attrs.current_rate_gbp_per_kwh;
+    const cheapestStart = slots.find((slot) => slot.start === attrs.lowest_future_rate_start)?.local_start || "—";
     return `<section>
       <div class="heading">
         <div><h3>${this._escape(label)}</h3><span>${this._escape(attrs.date || "Waiting for rates")}</span></div>
@@ -98,6 +129,8 @@ class AferiyAgilePlanCard extends HTMLElement {
       <p class="reason">${this._escape(attrs.reason || "")}</p>
       ${conservativeTomorrow ? `<p class="notice">Tomorrow assumes the battery starts at its reserve SOC; the plan will refine when it becomes Today.</p>` : ""}
       <div class="metrics">
+        ${this._metric("Current Agile price", `${this._rate(currentRate)}/kWh`, "price")}
+        ${this._metric("Cheapest remaining", `${this._rate(attrs.lowest_future_rate_gbp_per_kwh)}/kWh · ${cheapestStart}`, "price")}
         ${this._metric("Battery SOC", `${this._number(attrs.starting_soc, "%", 0)} → ${this._number(attrs.projected_soc_at_ready_by, "%", 0)}`, "soc")}
         ${this._metric(`Grid charge by ${attrs.ready_by || "16:00"}`, this._number(attrs.planned_grid_charge_kwh, " kWh", 2), "charge")}
         ${this._metric("Estimated charge cost", this._money(attrs.estimated_grid_charge_cost_gbp), "charge")}
@@ -113,7 +146,7 @@ class AferiyAgilePlanCard extends HTMLElement {
       </div>
       <h4>Charge and discharge schedule</h4>
       ${this._activeRows(slots)}
-      ${this._rateTimeline(slots)}
+      ${this._rateTimeline(slots, cheapestRate)}
       <p class="footnote">${this._escape(attrs.cost_estimate_note || "Costs are estimates, not a complete electricity bill.")}</p>
     </section>`;
   }
@@ -137,7 +170,7 @@ class AferiyAgilePlanCard extends HTMLElement {
         .metric { background: var(--secondary-background-color); border-radius: 10px; padding: 10px; border-left: 3px solid var(--divider-color); }
         .metric span { display: block; color: var(--secondary-text-color); font-size: 11px; margin-bottom: 4px; }
         .metric strong { font-size: 17px; } .metric.charge { border-left-color: #2196f3; } .metric.discharge { border-left-color: #f57c00; }
-        .metric.saving { border-left-color: var(--success-color, #43a047); } .metric.soc { border-left-color: #7e57c2; }
+        .metric.saving { border-left-color: var(--success-color, #43a047); } .metric.soc { border-left-color: #7e57c2; } .metric.price { border-left-color: #00838f; }
         .assumptions { display: flex; flex-wrap: wrap; gap: 6px; }
         .assumptions span { border: 1px solid var(--divider-color); border-radius: 999px; padding: 4px 7px; font-size: 11px; }
         .table-wrap { overflow-x: auto; } table { border-collapse: collapse; width: 100%; min-width: 650px; font-size: 12px; }
@@ -148,6 +181,10 @@ class AferiyAgilePlanCard extends HTMLElement {
         .rates { display: grid; grid-template-columns: repeat(8, minmax(54px, 1fr)); gap: 4px; margin-top: 8px; }
         .rate { background: var(--secondary-background-color); border-radius: 6px; padding: 5px; text-align: center; font-size: 10px; border-bottom: 3px solid transparent; }
         .rate span, .rate strong { display: block; } .rate.charge { border-bottom-color: #2196f3; } .rate.discharge { border-bottom-color: #f57c00; }
+        .rate.negative { background: #391cd9; color: white; } .rate.cheapest { background: #b9f6ca; color: #102a16; }
+        .rate.cheap { background: #d7f5df; color: #12331d; } .rate.low { background: #dcedc8; color: #263b10; }
+        .rate.medium { background: #ffe0b2; color: #472400; } .rate.high { background: #ffcdd2; color: #4a1015; }
+        .rate.current { outline: 2px solid var(--primary-color); outline-offset: 1px; font-weight: 700; }
         .footnote { margin-top: 12px; font-size: 11px; }
         @media (max-width: 700px) { .metrics { grid-template-columns: repeat(2, minmax(110px, 1fr)); } .rates { grid-template-columns: repeat(4, minmax(54px, 1fr)); } }
       </style>

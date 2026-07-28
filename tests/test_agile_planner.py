@@ -92,6 +92,24 @@ def test_today_never_selects_elapsed_periods() -> None:
     assert all(datetime.fromisoformat(slot["start"]) >= now for slot in active)
 
 
+def test_current_day_can_omit_elapsed_periods_when_all_actionable_periods_exist() -> None:
+    raw_rates = _rates("2026-07-27")[2:]
+    now = datetime(2026, 7, 27, 1, 15, tzinfo=ZoneInfo("Europe/London"))
+    plan = AGILE.build_agile_day_plan(
+        raw_rates,
+        timezone="Europe/London",
+        battery_capacity_kwh=5.874,
+        starting_soc=10,
+        reserve_soc=10,
+        expected_date=date(2026, 7, 27),
+        now=now,
+    )
+
+    assert plan["status"] == "proposed"
+    assert plan["rate_period_count"] == 46
+    assert plan["expected_rate_period_count"] == 45
+
+
 def test_limited_charge_cannot_create_impossible_discharge_energy() -> None:
     now = datetime(2026, 7, 27, 15, 0, tzinfo=ZoneInfo("Europe/London"))
     plan = _plan(
@@ -122,6 +140,17 @@ def test_rates_are_gbp_and_savings_are_not_divided_by_100() -> None:
     assert all(slot["charge_cost_gbp"] > 0 for slot in charge_slots)
     assert all(slot["avoided_import_cost_gbp"] > 0 for slot in discharge_slots)
     assert all(slot["net_saving_gbp"] > 0 for slot in discharge_slots)
+
+
+def test_current_and_cheapest_prices_are_derived_from_validated_rate_data() -> None:
+    now = datetime(2026, 7, 27, 12, 15, tzinfo=ZoneInfo("Europe/London"))
+    plan = _plan(now=now)
+
+    assert plan["current_rate_gbp_per_kwh"] == 0.0524
+    assert plan["current_rate_start"] == "2026-07-27T11:00:00+00:00"
+    assert plan["current_rate_end"] == "2026-07-27T11:30:00+00:00"
+    assert plan["lowest_future_rate_gbp_per_kwh"] == 0.0524
+    assert plan["lowest_future_rate_start"] == "2026-07-27T11:00:00+00:00"
 
 
 def test_unprofitable_periods_are_not_discharged() -> None:
