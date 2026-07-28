@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from math import isfinite
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -662,23 +663,24 @@ def _async_register_services(hass: HomeAssistant) -> None:
         )
 
     async def async_export_agile_plan(call: ServiceCall) -> None:
-        """Append the read-only Agile plans to a local JSON Lines trial file."""
+        """Append read-only Agile plans and live outcomes to a local trial file."""
         requested_entry_id = str(call.data.get("entry_id") or "").strip()
         label = str(call.data.get("label") or "manual").strip() or "manual"
         registry = er.async_get(hass)
-        active_entry_ids = sorted(
-            entry_id
+        active_entries = sorted(
+            (entry_id, value)
             for entry_id, value in (hass.data.get(DOMAIN) or {}).items()
             if isinstance(value, AeccBatteryCoordinator)
             and (not requested_entry_id or entry_id == requested_entry_id)
         )
-        if not active_entry_ids:
+        if not active_entries:
             _LOGGER.warning("AECC Agile plan export requested, but no matching coordinator was found")
             return
 
         exported_at = datetime.now(UTC).isoformat()
         plans: dict[str, dict[str, Any]] = {}
-        for entry_id in active_entry_ids:
+        telemetry: dict[str, dict[str, Any]] = {}
+        for entry_id, coordinator in active_entries:
             for day_kind in ("current", "next"):
                 entity_id = registry.async_get_entity_id(
                     Platform.SENSOR,
@@ -696,6 +698,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
                         if key not in _AGILE_PLAN_EXPORT_EXCLUDED_ATTRIBUTES
                     },
                 }
+            telemetry[entry_id] = _agile_trial_telemetry(
+                hass,
+                registry,
+                entry_id,
+                coordinator,
+            )
 
         if not plans:
             _LOGGER.warning("AECC Agile plan export found no Proposed Plan sensor states")
@@ -707,6 +715,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             "label": label,
             "control_enabled": False,
             "plans": plans,
+            "telemetry": telemetry,
         }
         export_path = hass.config.path(AGILE_PLAN_EXPORT_FILENAME)
         try:
@@ -724,6 +733,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 "exported_at": exported_at,
                 "label": label,
                 "plan_count": len(plans),
+                "telemetry_count": len(telemetry),
                 "file": AGILE_PLAN_EXPORT_FILENAME,
                 "control_enabled": False,
                 "note": "Read-only trial export; no battery command was sent.",
@@ -888,6 +898,54 @@ def _append_json_line(path: str, record: dict[str, Any]) -> None:
     with open(path, "a", encoding="utf-8") as export_file:
         export_file.write(json.dumps(record, default=str, separators=(",", ":")))
         export_file.write("\n")
+
+
+def _agile_trial_telemetry(
+    hass: HomeAssistant,
+    registry: er.EntityRegistry,
+    entry_id: str,
+    coordinator: AeccBatteryCoordinator,
+) -> dict[str, Any]:
+    """Return the non-identifying live measurements needed for plan review."""
+    def coordinator_value(key: str) -> float | None:
+        try:
+            value = float(coordinator.get_value(key))
+        except (TypeError, ValueError):
+            return None
+        return round(value, 3) if isfinite(value) else None
+
+    def entity_value(unique_suffix: str) -> float | None:
+        entity_id = registry.async_get_entity_id(
+            Platform.SENSOR,
+            DOMAIN,
+            f"{entry_id}_{unique_suffix}",
+        )
+        state = hass.states.get(entity_id) if entity_id else None
+        if state is None:
+            return None
+        try:
+            value = float(state.state)
+        except (TypeError, ValueError):
+            return None
+        return round(value, 3) if isfinite(value) else None
+
+    return {
+        "battery": {
+            "soc_percent": coordinator_value("average_battery_soc"),
+            "configured_capacity_kwh": round(float(coordinator.battery_capacity_kwh), 3),
+            "ac_charge_power_w": coordinator_value("ac_charging_power"),
+            "total_charge_power_w": coordinator_value("total_charge_power"),
+            "discharge_power_w": coordinator_value("battery_discharging_power"),
+            "total_battery_output_power_w": coordinator_value("total_battery_output_power"),
+        },
+        "site": {
+            "grid_power_w": coordinator_value("grid_power"),
+            "pv_power_w": coordinator_value("pv_power"),
+            "house_demand_power_w": entity_value("estimated_house_demand"),
+            "house_demand_energy_kwh": entity_value("house_demand_energy"),
+            "house_demand_daily_kwh": entity_value("house_demand_daily"),
+        },
+    }
 
 
 async def _fetch_control_register_range(

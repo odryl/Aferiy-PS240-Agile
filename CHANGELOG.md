@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.9
+
+- Expanded Agile trial exports with battery SOC/capacity, charge/discharge,
+  grid/PV and household-demand measurements, supporting a complete historic
+  plan-versus-outcome analysis after a week or two of half-hour samples.
+
 ## 1.8.8
 
 - Added `export_agile_plan`, a manual or automation-friendly service that

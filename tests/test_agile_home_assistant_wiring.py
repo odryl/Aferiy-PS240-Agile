@@ -57,6 +57,10 @@ def test_agile_plan_export_is_read_only_and_redacts_rate_source_metadata() -> No
     assert 'SERVICE_EXPORT_AGILE_PLAN = "export_agile_plan"' in INIT_SOURCE
     assert "AGILE_PLAN_EXPORT_FILENAME" in INIT_SOURCE
     assert 'frozenset({"mpan", "source_entity"})' in INIT_SOURCE
+    assert "_agile_trial_telemetry(" in INIT_SOURCE
+    assert '"house_demand_power_w"' in INIT_SOURCE
+    assert '"grid_power_w"' in INIT_SOURCE
+    assert '"soc_percent"' in INIT_SOURCE
     assert '"control_enabled": False' in INIT_SOURCE
     export_service = INIT_SOURCE.split("async def async_export_agile_plan", 1)[1].split(
         "async def async_restore_original_self_consumption", 1

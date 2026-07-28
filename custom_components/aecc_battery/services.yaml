@@ -80,7 +80,8 @@ snapshot_power_flow:
 export_agile_plan:
   name: Export Agile plan data
   description: >
-    Appends the current read-only Today and Tomorrow Agile plans to
+    Appends the current read-only Today and Tomorrow Agile plans, battery state,
+    grid/PV/charge/discharge readings, and household-demand measurements to
     /config/aecc_battery_agile_plan_export.jsonl for shadow-mode trial analysis.
     The export excludes MPAN and rate-source entity IDs and does not send any
     battery command.

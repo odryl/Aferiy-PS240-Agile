@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.8-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.9-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe, view-only Octopus Agile battery planner.
@@ -146,7 +146,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.8`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.9`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 
@@ -239,24 +239,22 @@ attributes expose the complete validated timetable and an explicit
 Use the `aecc_battery.export_agile_plan` service to append the current Today
 and Tomorrow read-only plans to `/config/aecc_battery_agile_plan_export.jsonl`.
 The JSON Lines file is intended for comparing a week or two of proposed plans
-with actual SOC, import and household demand. It excludes the MPAN and Octopus
-source entity ID, and never sends a battery command.
+with actual SOC, import and household demand. Each record also includes battery
+SOC/capacity, charge and discharge power, grid and PV power, and the
+integration's household-demand power plus cumulative energy readings. It
+excludes the MPAN and Octopus source entity ID, and never sends a battery
+command.
 
-For reliable trial captures, create an automation triggered by the two selected
-Octopus rate event entities, add a short delay so the plan sensors refresh, then
-call the service:
+For a useful plan-versus-outcome history, create this 30-minute automation:
 
 ```yaml
 trigger:
-  - platform: state
-    entity_id:
-      - event.octopus_energy_electricity_your_meter_current_day_rates
-      - event.octopus_energy_electricity_your_meter_next_day_rates
+  - platform: time_pattern
+    minutes: "/30"
 action:
-  - delay: "00:00:10"
   - service: aecc_battery.export_agile_plan
     data:
-      label: octopus_rate_update
+      label: half_hour_trial_sample
 ```
 
 After the trial, download the file using the File Editor, Samba share, or your
