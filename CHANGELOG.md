@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.8.6
+
+- Corrected actionable-rate validation for BottlecapDave's current-day Agile
+  events, which can validly end at 23:00. The plan now requires continuous
+  source data only through its configured protection end, rather than through
+  an unused midnight-to-protection-end tail.
+
 ## 1.8.5
 
 - Added validated current and cheapest-remaining Agile price attributes to each
@@ -13,6 +20,9 @@
 - Accept a partial current-day rate list when it omits only elapsed periods and
   still covers every future actionable half-hour through midnight; gaps in
   future coverage and incomplete next-day data remain invalid.
+- Only require rate coverage through the configured protection end. This accepts
+  BottlecapDave's valid 46-slot current-day payloads that end at 23:00 while
+  retaining strict validation of every period the plan can charge or discharge.
 
 ## 1.8.4
 
