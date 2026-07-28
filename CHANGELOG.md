@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.8
+
+- Added `export_agile_plan`, a manual or automation-friendly service that
+  appends redacted, read-only shadow-plan snapshots to a local JSON Lines file
+  for trial analysis.
+
 ## 1.8.7
 
 - Expose the Battery Capacity selector whenever the Agile planner is enabled,

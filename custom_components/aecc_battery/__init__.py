@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,6 +49,7 @@ PLATFORMS = [Platform.SENSOR, Platform.NUMBER, Platform.SELECT, Platform.TIME]
 SERVICE_SNAPSHOT_CONTROL_REGISTERS = "snapshot_control_registers"
 SERVICE_SNAPSHOT_EXPORT_REGISTERS = "snapshot_export_registers"
 SERVICE_SNAPSHOT_POWER_FLOW = "snapshot_power_flow"
+SERVICE_EXPORT_AGILE_PLAN = "export_agile_plan"
 SERVICE_RESTORE_ORIGINAL_SELF_CONSUMPTION = "restore_original_self_consumption"
 SERVICE_RESTORE_SCHEDULE_3_SELF_CONSUMPTION = "restore_schedule_3_self_consumption"
 OBSOLETE_EXPLORATION_SERVICES = (
@@ -59,6 +61,8 @@ EXPORT_SNAPSHOT_START_REGISTER = 3000
 EXPORT_SNAPSHOT_END_REGISTER = 3130
 FRONTEND_PATH = Path(__file__).parent / "frontend"
 FRONTEND_URL = "/aecc_battery_static"
+AGILE_PLAN_EXPORT_FILENAME = "aecc_battery_agile_plan_export.jsonl"
+_AGILE_PLAN_EXPORT_EXCLUDED_ATTRIBUTES = frozenset({"mpan", "source_entity"})
 
 OLD_ARRAY_SOC_UNIQUE_SUFFIXES = (
     "array_1_battery_soc",
@@ -400,6 +404,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
         hass.services.has_service(DOMAIN, SERVICE_SNAPSHOT_CONTROL_REGISTERS)
         and hass.services.has_service(DOMAIN, SERVICE_SNAPSHOT_EXPORT_REGISTERS)
         and hass.services.has_service(DOMAIN, SERVICE_SNAPSHOT_POWER_FLOW)
+        and hass.services.has_service(DOMAIN, SERVICE_EXPORT_AGILE_PLAN)
         and hass.services.has_service(DOMAIN, SERVICE_RESTORE_ORIGINAL_SELF_CONSUMPTION)
         and hass.services.has_service(DOMAIN, SERVICE_RESTORE_SCHEDULE_3_SELF_CONSUMPTION)
     ):
@@ -656,6 +661,76 @@ def _async_register_services(hass: HomeAssistant) -> None:
             len(entities),
         )
 
+    async def async_export_agile_plan(call: ServiceCall) -> None:
+        """Append the read-only Agile plans to a local JSON Lines trial file."""
+        requested_entry_id = str(call.data.get("entry_id") or "").strip()
+        label = str(call.data.get("label") or "manual").strip() or "manual"
+        registry = er.async_get(hass)
+        active_entry_ids = sorted(
+            entry_id
+            for entry_id, value in (hass.data.get(DOMAIN) or {}).items()
+            if isinstance(value, AeccBatteryCoordinator)
+            and (not requested_entry_id or entry_id == requested_entry_id)
+        )
+        if not active_entry_ids:
+            _LOGGER.warning("AECC Agile plan export requested, but no matching coordinator was found")
+            return
+
+        exported_at = datetime.now(UTC).isoformat()
+        plans: dict[str, dict[str, Any]] = {}
+        for entry_id in active_entry_ids:
+            for day_kind in ("current", "next"):
+                entity_id = registry.async_get_entity_id(
+                    Platform.SENSOR,
+                    DOMAIN,
+                    f"{entry_id}_agile_proposed_plan_{day_kind}",
+                )
+                state = hass.states.get(entity_id) if entity_id else None
+                if state is None:
+                    continue
+                plans[f"{entry_id}:{day_kind}"] = {
+                    "state": state.state,
+                    "attributes": {
+                        key: value
+                        for key, value in state.attributes.items()
+                        if key not in _AGILE_PLAN_EXPORT_EXCLUDED_ATTRIBUTES
+                    },
+                }
+
+        if not plans:
+            _LOGGER.warning("AECC Agile plan export found no Proposed Plan sensor states")
+            return
+
+        record = {
+            "schema_version": 1,
+            "exported_at": exported_at,
+            "label": label,
+            "control_enabled": False,
+            "plans": plans,
+        }
+        export_path = hass.config.path(AGILE_PLAN_EXPORT_FILENAME)
+        try:
+            await hass.async_add_executor_job(_append_json_line, export_path, record)
+        except OSError as exc:
+            _LOGGER.error("Could not export AECC Agile plan data to %s: %s", export_path, exc)
+            return
+
+        hass.states.async_set(
+            "sensor.aecc_battery_agile_plan_export",
+            "Exported",
+            {
+                "friendly_name": "AECC Agile Plan Export",
+                "icon": "mdi:file-export-outline",
+                "exported_at": exported_at,
+                "label": label,
+                "plan_count": len(plans),
+                "file": AGILE_PLAN_EXPORT_FILENAME,
+                "control_enabled": False,
+                "note": "Read-only trial export; no battery command was sent.",
+            },
+        )
+        _LOGGER.info("Exported %d read-only AECC Agile plan snapshots to %s", len(plans), export_path)
+
     async def async_restore_original_self_consumption(call: ServiceCall) -> None:
         """Run the original StekkerDeal self-consumption register write."""
         requested_entry_id = call.data.get("entry_id")
@@ -765,6 +840,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
             async_snapshot_export_registers,
         )
 
+    if not hass.services.has_service(DOMAIN, SERVICE_EXPORT_AGILE_PLAN):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_EXPORT_AGILE_PLAN,
+            async_export_agile_plan,
+        )
+
     if not hass.services.has_service(DOMAIN, SERVICE_RESTORE_ORIGINAL_SELF_CONSUMPTION):
         hass.services.async_register(
             DOMAIN,
@@ -799,6 +881,13 @@ def _diff_registers(
                 "after": after,
             }
     return changes
+
+
+def _append_json_line(path: str, record: dict[str, Any]) -> None:
+    """Append one JSON record off the Home Assistant event loop."""
+    with open(path, "a", encoding="utf-8") as export_file:
+        export_file.write(json.dumps(record, default=str, separators=(",", ":")))
+        export_file.write("\n")
 
 
 async def _fetch_control_register_range(

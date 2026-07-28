@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SENSOR_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "sensor.py").read_text()
+INIT_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "__init__.py").read_text()
 CARD_SOURCE = (
     ROOT
     / "custom_components"
@@ -50,6 +51,18 @@ def test_agile_planner_always_exposes_its_battery_capacity_setting() -> None:
     assert "DEFAULT_AGILE_PLANNER_ENABLED" in SELECT_SOURCE
     assert "or config_entry.options.get(" in SELECT_SOURCE
     assert "AeccBatteryCapacityPresetSelect" in SELECT_SOURCE
+
+
+def test_agile_plan_export_is_read_only_and_redacts_rate_source_metadata() -> None:
+    assert 'SERVICE_EXPORT_AGILE_PLAN = "export_agile_plan"' in INIT_SOURCE
+    assert "AGILE_PLAN_EXPORT_FILENAME" in INIT_SOURCE
+    assert 'frozenset({"mpan", "source_entity"})' in INIT_SOURCE
+    assert '"control_enabled": False' in INIT_SOURCE
+    export_service = INIT_SOURCE.split("async def async_export_agile_plan", 1)[1].split(
+        "async def async_restore_original_self_consumption", 1
+    )[0]
+    assert "async_write_register" not in export_service
+    assert "async_set_" not in export_service
 
 
 def test_card_discovers_entities_and_exposes_energy_costs_and_savings() -> None:
