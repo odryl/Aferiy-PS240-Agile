@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.5
 
 - Added validated current and cheapest-remaining Agile price attributes to each
   Proposed Plan, sourced from the same GBP/kWh rate list used by the planner.
