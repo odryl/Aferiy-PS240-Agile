@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -31,8 +33,8 @@ from .const import (
     DEFAULT_BRAND_PROFILE,
     DEFAULT_OFF_PEAK_END,
     DEFAULT_OFF_PEAK_START,
-    DEFAULT_TARIFF_PRESET,
     DEFAULT_OVERNIGHT_CHARGE_MODE,
+    DEFAULT_TARIFF_PRESET,
     DEFAULT_TIMEOUT,
     DOMAIN,
 )
@@ -43,11 +45,19 @@ from .tcp_manager import TCPClientManager
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.SENSOR, Platform.NUMBER, Platform.SELECT, Platform.TIME]
+PLATFORMS = [
+    Platform.SENSOR,
+    Platform.NUMBER,
+    Platform.SELECT,
+    Platform.TIME,
+    Platform.SWITCH,
+    Platform.BUTTON,
+]
 
 SERVICE_SNAPSHOT_CONTROL_REGISTERS = "snapshot_control_registers"
 SERVICE_SNAPSHOT_EXPORT_REGISTERS = "snapshot_export_registers"
 SERVICE_SNAPSHOT_POWER_FLOW = "snapshot_power_flow"
+SERVICE_EXPORT_AGILE_PLAN = "export_agile_plan"
 SERVICE_RESTORE_ORIGINAL_SELF_CONSUMPTION = "restore_original_self_consumption"
 SERVICE_RESTORE_SCHEDULE_3_SELF_CONSUMPTION = "restore_schedule_3_self_consumption"
 OBSOLETE_EXPLORATION_SERVICES = (
@@ -59,6 +69,8 @@ EXPORT_SNAPSHOT_START_REGISTER = 3000
 EXPORT_SNAPSHOT_END_REGISTER = 3130
 FRONTEND_PATH = Path(__file__).parent / "frontend"
 FRONTEND_URL = "/aecc_battery_static"
+AGILE_PLAN_EXPORT_FILENAME = "aecc_battery_agile_plan_export.jsonl"
+_AGILE_PLAN_EXPORT_EXCLUDED_ATTRIBUTES = frozenset({"mpan", "source_entity"})
 
 OLD_ARRAY_SOC_UNIQUE_SUFFIXES = (
     "array_1_battery_soc",
@@ -385,6 +397,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         coordinator: AeccBatteryCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        await coordinator.async_shutdown()
         await coordinator.client.async_disconnect()
         TCPClientManager.remove_instance(entry.data[CONF_HOST], entry.data[CONF_PORT])
     return unloaded
@@ -400,6 +413,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
         hass.services.has_service(DOMAIN, SERVICE_SNAPSHOT_CONTROL_REGISTERS)
         and hass.services.has_service(DOMAIN, SERVICE_SNAPSHOT_EXPORT_REGISTERS)
         and hass.services.has_service(DOMAIN, SERVICE_SNAPSHOT_POWER_FLOW)
+        and hass.services.has_service(DOMAIN, SERVICE_EXPORT_AGILE_PLAN)
         and hass.services.has_service(DOMAIN, SERVICE_RESTORE_ORIGINAL_SELF_CONSUMPTION)
         and hass.services.has_service(DOMAIN, SERVICE_RESTORE_SCHEDULE_3_SELF_CONSUMPTION)
     ):
@@ -656,6 +670,85 @@ def _async_register_services(hass: HomeAssistant) -> None:
             len(entities),
         )
 
+    async def async_export_agile_plan(call: ServiceCall) -> None:
+        """Append read-only Agile plans and live outcomes to a local trial file."""
+        requested_entry_id = str(call.data.get("entry_id") or "").strip()
+        label = str(call.data.get("label") or "manual").strip() or "manual"
+        registry = er.async_get(hass)
+        active_entries = sorted(
+            (entry_id, value)
+            for entry_id, value in (hass.data.get(DOMAIN) or {}).items()
+            if isinstance(value, AeccBatteryCoordinator)
+            and (not requested_entry_id or entry_id == requested_entry_id)
+        )
+        if not active_entries:
+            _LOGGER.warning("AECC Agile plan export requested, but no matching coordinator was found")
+            return
+
+        exported_at = datetime.now(UTC).isoformat()
+        plans: dict[str, dict[str, Any]] = {}
+        telemetry: dict[str, dict[str, Any]] = {}
+        for entry_id, coordinator in active_entries:
+            for day_kind in ("current", "next"):
+                entity_id = registry.async_get_entity_id(
+                    Platform.SENSOR,
+                    DOMAIN,
+                    f"{entry_id}_agile_proposed_plan_{day_kind}",
+                )
+                state = hass.states.get(entity_id) if entity_id else None
+                if state is None:
+                    continue
+                plans[f"{entry_id}:{day_kind}"] = {
+                    "state": state.state,
+                    "attributes": {
+                        key: value
+                        for key, value in state.attributes.items()
+                        if key not in _AGILE_PLAN_EXPORT_EXCLUDED_ATTRIBUTES
+                    },
+                }
+            telemetry[entry_id] = _agile_trial_telemetry(
+                hass,
+                registry,
+                entry_id,
+                coordinator,
+            )
+
+        if not plans:
+            _LOGGER.warning("AECC Agile plan export found no Proposed Plan sensor states")
+            return
+
+        record = {
+            "schema_version": 1,
+            "exported_at": exported_at,
+            "label": label,
+            "control_enabled": False,
+            "plans": plans,
+            "telemetry": telemetry,
+        }
+        export_path = hass.config.path(AGILE_PLAN_EXPORT_FILENAME)
+        try:
+            await hass.async_add_executor_job(_append_json_line, export_path, record)
+        except OSError as exc:
+            _LOGGER.error("Could not export AECC Agile plan data to %s: %s", export_path, exc)
+            return
+
+        hass.states.async_set(
+            "sensor.aecc_battery_agile_plan_export",
+            "Exported",
+            {
+                "friendly_name": "AECC Agile Plan Export",
+                "icon": "mdi:file-export-outline",
+                "exported_at": exported_at,
+                "label": label,
+                "plan_count": len(plans),
+                "telemetry_count": len(telemetry),
+                "file": AGILE_PLAN_EXPORT_FILENAME,
+                "control_enabled": False,
+                "note": "Read-only trial export; no battery command was sent.",
+            },
+        )
+        _LOGGER.info("Exported %d read-only AECC Agile plan snapshots to %s", len(plans), export_path)
+
     async def async_restore_original_self_consumption(call: ServiceCall) -> None:
         """Run the original StekkerDeal self-consumption register write."""
         requested_entry_id = call.data.get("entry_id")
@@ -765,6 +858,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
             async_snapshot_export_registers,
         )
 
+    if not hass.services.has_service(DOMAIN, SERVICE_EXPORT_AGILE_PLAN):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_EXPORT_AGILE_PLAN,
+            async_export_agile_plan,
+        )
+
     if not hass.services.has_service(DOMAIN, SERVICE_RESTORE_ORIGINAL_SELF_CONSUMPTION):
         hass.services.async_register(
             DOMAIN,
@@ -799,6 +899,61 @@ def _diff_registers(
                 "after": after,
             }
     return changes
+
+
+def _append_json_line(path: str, record: dict[str, Any]) -> None:
+    """Append one JSON record off the Home Assistant event loop."""
+    with open(path, "a", encoding="utf-8") as export_file:
+        export_file.write(json.dumps(record, default=str, separators=(",", ":")))
+        export_file.write("\n")
+
+
+def _agile_trial_telemetry(
+    hass: HomeAssistant,
+    registry: er.EntityRegistry,
+    entry_id: str,
+    coordinator: AeccBatteryCoordinator,
+) -> dict[str, Any]:
+    """Return the non-identifying live measurements needed for plan review."""
+    def coordinator_value(key: str) -> float | None:
+        try:
+            value = float(coordinator.get_value(key))
+        except (TypeError, ValueError):
+            return None
+        return round(value, 3) if isfinite(value) else None
+
+    def entity_value(unique_suffix: str) -> float | None:
+        entity_id = registry.async_get_entity_id(
+            Platform.SENSOR,
+            DOMAIN,
+            f"{entry_id}_{unique_suffix}",
+        )
+        state = hass.states.get(entity_id) if entity_id else None
+        if state is None:
+            return None
+        try:
+            value = float(state.state)
+        except (TypeError, ValueError):
+            return None
+        return round(value, 3) if isfinite(value) else None
+
+    return {
+        "battery": {
+            "soc_percent": coordinator_value("average_battery_soc"),
+            "configured_capacity_kwh": round(float(coordinator.battery_capacity_kwh), 3),
+            "ac_charge_power_w": coordinator_value("ac_charging_power"),
+            "total_charge_power_w": coordinator_value("total_charge_power"),
+            "discharge_power_w": coordinator_value("battery_discharging_power"),
+            "total_battery_output_power_w": coordinator_value("total_battery_output_power"),
+        },
+        "site": {
+            "grid_power_w": coordinator_value("grid_power"),
+            "pv_power_w": coordinator_value("pv_power"),
+            "house_demand_power_w": entity_value("estimated_house_demand"),
+            "house_demand_energy_kwh": entity_value("house_demand_energy"),
+            "house_demand_daily_kwh": entity_value("house_demand_daily"),
+        },
+    }
 
 
 async def _fetch_control_register_range(

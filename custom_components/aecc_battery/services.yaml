@@ -77,6 +77,29 @@ snapshot_power_flow:
       selector:
         text:
 
+export_agile_plan:
+  name: Export Agile plan data
+  description: >
+    Appends the current read-only Today and Tomorrow Agile plans, battery state,
+    grid/PV/charge/discharge readings, and household-demand measurements to
+    /config/aecc_battery_agile_plan_export.jsonl for shadow-mode trial analysis.
+    The export excludes MPAN and rate-source entity IDs and does not send any
+    battery command.
+  fields:
+    label:
+      name: Label
+      description: Optional trial label, for example octopus_rate_update.
+      required: false
+      example: octopus_rate_update
+      selector:
+        text:
+    entry_id:
+      name: Entry ID
+      description: Optional Home Assistant config entry ID. Leave blank to export every active AECC Battery entry.
+      required: false
+      selector:
+        text:
+
 restore_original_self_consumption:
   name: Restore stock self-consumption
   description: >

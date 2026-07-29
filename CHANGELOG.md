@@ -1,6 +1,65 @@
 # Changelog
 
-## Unreleased
+## 1.8.11
+
+- Added a local `Restart Data Logger` button that sends datalogger parameter
+  `32 = 1` over the existing Wi-Fi TCP connection. A disconnect immediately
+  after dispatch is expected while the logger reboots.
+- Added an opt-in, persisted `Automatic Data Logger Restart` switch. When on,
+  it repeats the same local restart every three hours; it is off by default and
+  exposes its next/last dispatch details as entity attributes.
+- Cancel the integration's background tasks cleanly when an entry is unloaded.
+
+## 1.8.10
+
+- Added an opt-in, persisted Self-Gen reconnect queue for manual use when the
+  PS240 Wi-Fi is unavailable. It holds one `Self-Gen/Zero Export` request for
+  60 minutes, waits for healthy/stable local polling after reconnect, sends it
+  once, and records the verified result.
+- New manual requests, queue disablement, and expiry cancel the pending action.
+  Charge, Discharge, Feed, and all Agile Proposed Plan actions are never queued.
+
+## 1.8.9
+
+- Expanded Agile trial exports with battery SOC/capacity, charge/discharge,
+  grid/PV and household-demand measurements, supporting a complete historic
+  plan-versus-outcome analysis after a week or two of half-hour samples.
+
+## 1.8.8
+
+- Added `export_agile_plan`, a manual or automation-friendly service that
+  appends redacted, read-only shadow-plan snapshots to a local JSON Lines file
+  for trial analysis.
+
+## 1.8.7
+
+- Expose the Battery Capacity selector whenever the Agile planner is enabled,
+  instead of hiding this essential planning input behind Advanced Energy Estimate
+  Sensors.
+
+## 1.8.6
+
+- Corrected actionable-rate validation for BottlecapDave's current-day Agile
+  events, which can validly end at 23:00. The plan now requires continuous
+  source data only through its configured protection end, rather than through
+  an unused midnight-to-protection-end tail.
+
+## 1.8.5
+
+- Added validated current and cheapest-remaining Agile price attributes to each
+  Proposed Plan, sourced from the same GBP/kWh rate list used by the planner.
+- Made the bundled Agile card visually actionable: it highlights the live,
+  cheapest and negative-price periods and uses configurable green/amber/red
+  price bands compatible with the familiar Octopus Energy Rates Card defaults.
+- Treat unpublished or empty Octopus day-rate events as `Waiting for Rates` and
+  avoid invalidating today's complete plan solely because tomorrow is not yet
+  published; meter/tariff matching still applies as soon as both lists exist.
+- Accept a partial current-day rate list when it omits only elapsed periods and
+  still covers every future actionable half-hour through midnight; gaps in
+  future coverage and incomplete next-day data remain invalid.
+- Only require rate coverage through the configured protection end. This accepts
+  BottlecapDave's valid 46-slot current-day payloads that end at 23:00 while
+  retaining strict validation of every period the plan can charge or discharge.
 
 ## 1.8.4
 

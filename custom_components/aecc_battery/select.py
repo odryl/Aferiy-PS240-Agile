@@ -16,7 +16,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     BATTERY_CAPACITY_PRESET_MODULE_COUNTS,
     CONF_ADVANCED_ENERGY_SENSORS,
+    CONF_AGILE_PLANNER_ENABLED,
     CONF_TARIFF_PRESET,
+    DEFAULT_AGILE_PLANNER_ENABLED,
     DEFAULT_BATTERY_CAPACITY_KWH,
     DEFAULT_CHARGE_POWER_W,
     DEFAULT_OFF_PEAK_END,
@@ -42,6 +44,12 @@ _LOGGER = logging.getLogger(__name__)
 
 OPERATING_MODE_SELF_GEN = "Self-Gen/Zero Export"
 OPERATING_MODE_OPTIONS = [OPERATING_MODE_SELF_GEN, "Idle", "Charge", "Discharge", "Feed"]
+SELF_GEN_RECONNECT_QUEUE_DISABLED = "Off"
+SELF_GEN_RECONNECT_QUEUE_ENABLED = "On (60 minutes)"
+SELF_GEN_RECONNECT_QUEUE_OPTIONS = [
+    SELF_GEN_RECONNECT_QUEUE_DISABLED,
+    SELF_GEN_RECONNECT_QUEUE_ENABLED,
+]
 CAPACITY_PRESET_OPTIONS = [
     battery_capacity_preset_label(module_count)
     for module_count in BATTERY_CAPACITY_PRESET_MODULE_COUNTS
@@ -89,8 +97,15 @@ async def async_setup_entry(
         AeccAutomaticOvernightChargingSelect(coordinator, config_entry),
         AeccSmartTariffPresetSelect(coordinator, config_entry),
         AeccSolarAvailabilitySelect(coordinator, config_entry),
+        AeccSelfGenReconnectQueueSelect(coordinator, config_entry),
     ]
-    if config_entry.options.get(CONF_ADVANCED_ENERGY_SENSORS, False):
+    if config_entry.options.get(
+        CONF_ADVANCED_ENERGY_SENSORS,
+        False,
+    ) or config_entry.options.get(
+        CONF_AGILE_PLANNER_ENABLED,
+        DEFAULT_AGILE_PLANNER_ENABLED,
+    ):
         entities.append(AeccBatteryCapacityPresetSelect(coordinator, config_entry))
     async_add_entities(entities)
 
@@ -159,7 +174,11 @@ class AeccOperatingModeSelect(CoordinatorEntity[AeccBatteryCoordinator], SelectE
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success
+        # Keep the selector usable during a Wi-Fi outage only when the user
+        # explicitly opted into its narrow Self-Gen reconnect queue.
+        return self.coordinator.last_update_success or bool(
+            getattr(self.coordinator, "self_gen_reconnect_queue_enabled", False)
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -172,10 +191,15 @@ class AeccOperatingModeSelect(CoordinatorEntity[AeccBatteryCoordinator], SelectE
             ),
             "last_local_command": latest_write.get("operation"),
             "last_local_command_at": latest_write.get("timestamp"),
+            "self_gen_reconnect_queue": self.coordinator.pending_self_gen_reconnect,
         }
 
     async def async_select_option(self, option: str) -> None:
         _LOGGER.info("User selected operating mode: %s", option)
+
+        # Any new manual intent supersedes a delayed restore, including a
+        # repeated Self-Gen request that will replace it if delivery fails.
+        await self.coordinator.async_cancel_pending_self_gen_reconnect()
 
         if option in (OPERATING_MODE_SELF_GEN, "Self-Consumption"):
             success = await self.coordinator.async_set_work_mode(MODE_SELF_CONSUMPTION)
@@ -186,7 +210,11 @@ class AeccOperatingModeSelect(CoordinatorEntity[AeccBatteryCoordinator], SelectE
                 self.coordinator.async_set_updated_data(self.coordinator.data or {})
                 self.async_write_ha_state()
             else:
-                _LOGGER.error("Failed to set operating mode to Self-Gen/Zero Export")
+                queued = await self.coordinator.async_queue_self_gen_on_reconnect()
+                if queued:
+                    _LOGGER.warning("Self-Gen/Zero Export will be restored when the PS240 reconnects")
+                else:
+                    _LOGGER.error("Failed to set operating mode to Self-Gen/Zero Export")
             return
 
         if option == "Idle":
@@ -258,6 +286,59 @@ class AeccOperatingModeSelect(CoordinatorEntity[AeccBatteryCoordinator], SelectE
             return
 
         _LOGGER.warning("Unknown operating mode selected: %s", option)
+
+
+class AeccSelfGenReconnectQueueSelect(
+    CoordinatorEntity[AeccBatteryCoordinator],
+    SelectEntity,
+):
+    """Opt-in policy for one delayed manual Self-Gen restore."""
+
+    _attr_icon = "mdi:lan-connect"
+    _attr_has_entity_name = True
+    _attr_name = "Self-Gen Reconnect Queue"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_options = SELF_GEN_RECONNECT_QUEUE_OPTIONS
+
+    def __init__(self, coordinator: AeccBatteryCoordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{config_entry.entry_id}_self_gen_reconnect_queue"
+
+    @property
+    def current_option(self) -> str:
+        if self.coordinator.self_gen_reconnect_queue_enabled:
+            return SELF_GEN_RECONNECT_QUEUE_ENABLED
+        return SELF_GEN_RECONNECT_QUEUE_DISABLED
+
+    @property
+    def available(self) -> bool:
+        # This is a local preference, so it remains configurable while the
+        # battery Wi-Fi is unavailable.
+        return True
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        pending = self.coordinator.pending_self_gen_reconnect
+        return {
+            "scope": "manual Self-Gen/Zero Export only",
+            "expiry_minutes": 60,
+            "pending_restore": pending is not None,
+            "requested_at": pending.get("requested_at") if pending else None,
+            "expires_at": pending.get("expires_at") if pending else None,
+            "safety_note": (
+                "Charge, Discharge, Feed, and Agile Proposed Plans are never queued."
+            ),
+        }
+
+    async def async_select_option(self, option: str) -> None:
+        if option not in SELF_GEN_RECONNECT_QUEUE_OPTIONS:
+            _LOGGER.warning("Unknown Self-Gen reconnect queue option: %s", option)
+            return
+        enabled = option == SELF_GEN_RECONNECT_QUEUE_ENABLED
+        await self.coordinator.async_set_self_gen_reconnect_queue_enabled(enabled)
+        _LOGGER.info("Self-Gen reconnect queue %s", "enabled" if enabled else "disabled")
+        self.coordinator.async_set_updated_data(self.coordinator.data or {})
+        self.async_write_ha_state()
 
 
 class AeccBatteryCapacityPresetSelect(

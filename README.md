@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.4-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.11-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe, view-only Octopus Agile battery planner.
@@ -38,6 +38,8 @@ compatible. This fork appears in Home Assistant as **AFERIY PS240 Agile**.
 - GBP/kWh profitability checks and malformed/stale tariff-data safeguards
 - Household-demand-aware planning based on an anonymized half-hour profile
 - Connection health and last-command result sensors
+- Optional one-hour manual Self-Gen restore queue for PS240 Wi-Fi outages
+- Local data logger restart button and opt-in three-hour automatic restart
 - Grid meter agreement and charging reason diagnostics
 
 ## Before You Install
@@ -88,6 +90,31 @@ If you have more than one PS240 in the same AFERIY/AEC Cloud system, add only th
 
 The master controls the slave units. You do not need a separate local integration entry for each battery. In testing, one local connection to the master has been more reliable than trying to connect to every unit.
 
+### Queue Self-Gen after a Wi-Fi outage
+
+`Self-Gen Reconnect Queue` is a local configuration selector, under the device's
+configuration entities. Set it to `On (60 minutes)` before relying on it. If the
+PS240 Wi-Fi is down, selecting `Self-Gen/Zero Export` stores one request for up
+to 60 minutes. Once the integration has reconnected and received stable battery
+data, it sends the Self-Gen restore once and verifies the acknowledgement.
+
+Selecting any other manual operating mode cancels the queued request. The queue
+never replays Charge, Discharge or Feed, and it is completely separate from the
+view-only Agile Proposed Plan.
+
+### Restart the data logger locally
+
+The device's configuration entities include `Restart Data Logger` and
+`Automatic Data Logger Restart`. The button sends one restart immediately over
+the existing local TCP connection. The switch is off by default; when enabled,
+it persists the choice and repeats the restart every three hours while Home
+Assistant is running. Turning the switch off cancels the pending restart.
+
+The restart applies to the Wi-Fi/BLE data logger, not the PS240 battery power
+electronics. Its local connection should disappear briefly after each command
+and polling will reconnect automatically. Do not use the control during a
+firmware update or while changing the logger's network settings.
+
 System-level readings are reported through the master. System Average Battery SOC is the main multi-unit SOC source and matches the behaviour shown in the AEC Cloud app.
 
 The integration creates generic `Battery 1 SOC`, `Battery 2 SOC`, and similar entities from the local `Storage_list` entries reported by the master. This avoids tying dashboards to a particular serial number when a unit is replaced.
@@ -126,6 +153,11 @@ Rates` means Octopus has not supplied the required entity data. `Invalid`
 means the integration deliberately rejected stale, incomplete, non-Agile, or
 mismatched meter data; the sensor's `reason` attribute explains why.
 
+Before Octopus publishes tomorrow's prices, **Tomorrow** correctly stays at
+`Waiting for Rates`; it does not invalidate an otherwise complete **Today**
+plan. Once both rate events contain a published rate list, their MPAN, meter
+serial, and Agile tariff are compared before either plan uses the data.
+
 The plan aims for 100% SOC by 16:00, protects expected household demand until
 22:00, and only proposes discharge when the avoided import price exceeds the
 estimated delivered replacement cost by at least £0.03/kWh. The Agile ceiling
@@ -141,7 +173,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.4`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.11`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 
@@ -212,10 +244,49 @@ The card provides separate Today and Tomorrow plans with:
 - half-hour action, price, energy, average power and partial-period duration
 - a collapsible view of all half-hour Agile prices
 
+The price grid follows the same useful conventions as the Octopus Energy Rates
+card: the live period is outlined, the cheapest remaining period is highlighted,
+negative prices are blue, and increasing price bands progress from green through
+amber to red. The defaults are 5p, 20p and 30p/kWh; override them in the card
+YAML if they do not suit your household:
+
+```yaml
+lowlimit: 5
+mediumlimit: 20
+highlimit: 30
+```
+
 The cost figures cover the planned battery actions and protected-window value;
 they are not a forecast of the household's complete electricity bill. Sensor
 attributes expose the complete validated timetable and an explicit
 `control_enabled: false` marker.
+
+## Export Agile Shadow Plans
+
+Use the `aecc_battery.export_agile_plan` service to append the current Today
+and Tomorrow read-only plans to `/config/aecc_battery_agile_plan_export.jsonl`.
+The JSON Lines file is intended for comparing a week or two of proposed plans
+with actual SOC, import and household demand. Each record also includes battery
+SOC/capacity, charge and discharge power, grid and PV power, and the
+integration's household-demand power plus cumulative energy readings. It
+excludes the MPAN and Octopus source entity ID, and never sends a battery
+command.
+
+For a useful plan-versus-outcome history, create this 30-minute automation:
+
+```yaml
+trigger:
+  - platform: time_pattern
+    minutes: "/30"
+action:
+  - service: aecc_battery.export_agile_plan
+    data:
+      label: half_hour_trial_sample
+```
+
+After the trial, download the file using the File Editor, Samba share, or your
+usual Home Assistant backup method. The **AECC Agile Plan Export** sensor shows
+the most recent successful export time and file name.
 
 If Home Assistant reports that the custom card does not exist, confirm the
 resource URL, restart Home Assistant, and hard-refresh the browser. If the card
@@ -259,11 +330,11 @@ The fork retains upstream options for polling, advanced energy estimates,
 fixed off-peak tariffs, Solcast, occupancy, manual controls, and Smart Overnight
 Charging. Those controls are independent of the Agile Proposed Plan.
 
-The device Configuration section also provides Overnight Charge mode, Manual SOC, Energy Tariff, Custom Off-Peak Start/End, Solar Availability, Overnight Status, and Recommended Overnight SOC. Battery Capacity is available when Advanced Energy Estimate Sensors is enabled.
+The device Configuration section also provides Overnight Charge mode, Manual SOC, Energy Tariff, Custom Off-Peak Start/End, Solar Availability, Overnight Status, and Recommended Overnight SOC. Battery Capacity is always available while the Agile planner is enabled (and is also available when Advanced Energy Estimate Sensors is enabled).
 
 The advanced estimate sensors are disabled by default because they can depend on external Home Assistant entities such as grid meters, solar forecast data, or household demand history.
 
-Battery Capacity is an advanced estimate input selected in 1.958 kWh module steps. It is used by the charge and overnight energy calculations only. It does not limit the Battery N SOC sensors reported by the master.
+Battery Capacity is an estimate input selected in 1.958 kWh module steps. It is used by the Agile charge/discharge plan and overnight energy calculations only. It does not limit the Battery N SOC sensors reported by the master. Set it to the actual number of installed modules before relying on an Agile plan.
 
 The Energy Tariff defaults to **Octopus Agile**. In Agile mode, the Proposed
 Plan uses the selected current-day and next-day Octopus rate events and the

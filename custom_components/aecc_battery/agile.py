@@ -107,33 +107,66 @@ def _invalid_plan(reason: str, errors: list[str] | None = None) -> dict[str, Any
     }
 
 
-def _validate_complete_day(
+def _next_half_hour_boundary(moment: datetime) -> datetime:
+    """Return the first 30-minute boundary at or after a timezone-aware time."""
+    if moment.tzinfo is None:
+        raise ValueError("Rate coverage time must include a timezone.")
+    rounded = moment.replace(second=0, microsecond=0)
+    remainder = rounded.minute % 30
+    if remainder:
+        rounded += timedelta(minutes=30 - remainder)
+    return rounded
+
+
+def _validate_actionable_coverage(
     rates: list[AgileRate],
     *,
     expected_date: date,
     local_zone: ZoneInfo,
+    planning_time: datetime,
+    protected_until: time,
 ) -> tuple[int, list[str]]:
-    """Validate exact, consecutive local-day coverage, including DST days."""
+    """Validate all plan-eligible periods through protection end, including DST."""
     day_start = datetime.combine(expected_date, time.min, tzinfo=local_zone)
     next_day_start = datetime.combine(expected_date + timedelta(days=1), time.min, tzinfo=local_zone)
-    expected_periods = int(
-        (next_day_start.astimezone(UTC) - day_start.astimezone(UTC)).total_seconds() / 1800
+    coverage_start = max(day_start, _next_half_hour_boundary(planning_time))
+    coverage_end = min(
+        next_day_start,
+        datetime.combine(expected_date, protected_until, tzinfo=local_zone),
     )
-    errors: list[str] = []
-    if len(rates) != expected_periods:
-        errors.append(
-            f"Expected {expected_periods} consecutive periods for {expected_date.isoformat()}, "
-            f"received {len(rates)}."
+    expected_periods = int(
+        max(
+            0,
+            (coverage_end.astimezone(UTC) - coverage_start.astimezone(UTC)).total_seconds()
+            / 1800,
         )
-    if rates and rates[0].start != day_start:
-        errors.append(f"First rate does not begin at local midnight on {expected_date.isoformat()}.")
-    if rates and rates[-1].end != next_day_start:
-        errors.append(f"Last rate does not end at local midnight after {expected_date.isoformat()}.")
-    for previous, current in pairwise(rates):
+    )
+    actionable_rates = [
+        rate
+        for rate in rates
+        if coverage_start <= rate.start < coverage_end
+    ]
+    errors: list[str] = []
+    if len(actionable_rates) != expected_periods:
+        errors.append(
+            f"Expected {expected_periods} consecutive actionable periods from "
+            f"{coverage_start.isoformat()} to {coverage_end.isoformat()} for "
+            f"{expected_date.isoformat()}, "
+            f"received {len(actionable_rates)}."
+        )
+    if actionable_rates and actionable_rates[0].start != coverage_start:
+        errors.append(
+            f"First actionable rate does not begin at {coverage_start.isoformat()}."
+        )
+    if actionable_rates and actionable_rates[-1].end != coverage_end:
+        errors.append(
+            f"Last actionable rate does not end at {coverage_end.isoformat()}."
+        )
+    for previous, current in pairwise(actionable_rates):
         if current.start != previous.end:
             errors.append(f"Rate coverage has a gap or overlap at {current.start.isoformat()}.")
             break
-    if any(rate.start.astimezone(local_zone).date() != expected_date for rate in rates):
+    if any(rate.start.astimezone(local_zone).date() != expected_date for rate in actionable_rates):
         errors.append("The payload contains rates for a different local date.")
     return expected_periods, errors
 
@@ -174,20 +207,51 @@ def build_agile_day_plan(
         return _invalid_plan(
             f"Rate payload is for {payload_date.isoformat()}, expected {day.isoformat()}."
         )
-    expected_periods, coverage_errors = _validate_complete_day(
-        rates,
-        expected_date=day,
-        local_zone=local_zone,
-    )
-    if coverage_errors:
-        return _invalid_plan("Octopus rates do not cover the expected day completely.", coverage_errors)
-
     if now is None:
         planning_time = datetime.combine(day, time.min, tzinfo=local_zone)
     elif now.tzinfo is None:
         return _invalid_plan("Planner time must include a timezone.")
     else:
         planning_time = now.astimezone(local_zone)
+
+    try:
+        ready_time = time.fromisoformat(ready_by)
+        protected_time = time.fromisoformat(protected_until)
+    except ValueError:
+        return _invalid_plan("Ready-by and protection-end times must use HH:MM format.")
+    if ready_time >= protected_time:
+        return _invalid_plan("Protection end must be later than ready-by time.")
+
+    expected_periods, coverage_errors = _validate_actionable_coverage(
+        rates,
+        expected_date=day,
+        local_zone=local_zone,
+        planning_time=planning_time,
+        protected_until=protected_time,
+    )
+    if coverage_errors:
+        return _invalid_plan("Octopus rates do not cover all actionable periods for the expected day.", coverage_errors)
+    full_day_expected_periods = int(
+        (
+            datetime.combine(day + timedelta(days=1), time.min, tzinfo=local_zone).astimezone(UTC)
+            - datetime.combine(day, time.min, tzinfo=local_zone).astimezone(UTC)
+        ).total_seconds()
+        / 1800
+    )
+
+    # Expose the same price landmarks used by the dashboard.  These are derived
+    # from the already validated GBP/kWh records, rather than from a separate
+    # "current price" sensor that could belong to a different agreement.
+    current_rate = next(
+        (rate for rate in rates if rate.start <= planning_time < rate.end),
+        None,
+    )
+    future_rates = [rate for rate in rates if rate.end > planning_time]
+    cheapest_future_rate = min(
+        future_rates,
+        key=lambda rate: (rate.value_inc_vat, rate.start),
+        default=None,
+    )
 
     try:
         capacity = float(battery_capacity_kwh)
@@ -228,8 +292,6 @@ def build_agile_day_plan(
 
     max_charge_power_w = min(_SAFE_SYSTEM_POWER_CEILING_W, int(requested_charge_power_w))
     max_discharge_power_w = min(_SAFE_SYSTEM_POWER_CEILING_W, int(requested_discharge_power_w))
-    ready_time = time.fromisoformat(ready_by)
-    protected_time = time.fromisoformat(protected_until)
     charge_candidates = [
         rate
         for rate in rates
@@ -405,8 +467,22 @@ def build_agile_day_plan(
         "timezone": timezone,
         "rate_unit": "GBP/kWh",
         "rate_period_count": len(rates),
-        "expected_rate_period_count": expected_periods,
+        "expected_rate_period_count": full_day_expected_periods,
+        "expected_actionable_rate_period_count": expected_periods,
         "planning_time": planning_time.isoformat(),
+        "current_rate_gbp_per_kwh": (
+            round(current_rate.value_inc_vat, 5) if current_rate is not None else None
+        ),
+        "current_rate_start": current_rate.start.isoformat() if current_rate is not None else None,
+        "current_rate_end": current_rate.end.isoformat() if current_rate is not None else None,
+        "lowest_future_rate_gbp_per_kwh": (
+            round(cheapest_future_rate.value_inc_vat, 5)
+            if cheapest_future_rate is not None
+            else None
+        ),
+        "lowest_future_rate_start": (
+            cheapest_future_rate.start.isoformat() if cheapest_future_rate is not None else None
+        ),
         "ready_by": ready_by,
         "protected_until": protected_until,
         "starting_soc": round(start_soc, 1),

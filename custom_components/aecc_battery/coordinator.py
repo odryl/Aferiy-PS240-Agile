@@ -57,6 +57,7 @@ from .tcp_client import AeccTcpClient
 
 _LOGGER = logging.getLogger(__name__)
 _RUNTIME_CONFIG_STORAGE_VERSION = 1
+_SELF_GEN_RECONNECT_QUEUE_TTL = timedelta(minutes=60)
 _OVERNIGHT_ROLLING_RECHECK_MIN_INCREASE_SOC = 2
 _DUPLICATE_WRITE_SUPPRESS_SECONDS = 10
 _DUPLICATE_WRITE_PREFIXES = (
@@ -68,6 +69,7 @@ _DUPLICATE_WRITE_PREFIXES = (
     "work_mode(",
 )
 _DEVICE_MANAGEMENT_REFRESH_INTERVAL = timedelta(minutes=30)
+_DATALOGGER_AUTO_RESTART_INTERVAL = timedelta(hours=3)
 _MORNING_TRACKER_MIN_UPDATE_SOC = 0.2
 _ADAPTIVE_MORNING_CREDIT_MIN = -0.15
 _ADAPTIVE_MORNING_CREDIT_MAX = 0.15
@@ -177,6 +179,18 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else None
         )
         self.runtime_preferences_loaded: bool = False
+        # This is intentionally limited to a manually requested Self-Gen
+        # restore.  It is never used by the Agile shadow planner or by any of
+        # the charge/discharge/feed commands.
+        self.self_gen_reconnect_queue_enabled: bool = False
+        self._pending_self_gen_reconnect: dict[str, str] | None = None
+        self.auto_datalogger_restart_enabled: bool = False
+        self.next_datalogger_restart_at: datetime | None = None
+        self.last_datalogger_restart_at: datetime | None = None
+        self.last_datalogger_restart_reason: str | None = None
+        self.last_datalogger_restart_dispatched: bool | None = None
+        self._auto_datalogger_restart_task: asyncio.Task | None = None
+        self._datalogger_restart_lock = asyncio.Lock()
         self._manufacturer = manufacturer
         self._model = model
         self._consecutive_failures: int = 0
@@ -310,6 +324,7 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_setup(self) -> None:
         await self.client.async_connect()
         await self.async_load_runtime_preferences()
+        self._sync_auto_datalogger_restart_task()
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
@@ -410,6 +425,7 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._last_good_data = raw
         await self._async_maybe_refresh_device_management()
+        await self._async_maybe_apply_pending_self_gen_reconnect()
         self._schedule_overnight_evaluation()
         return raw
 
@@ -500,6 +516,18 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
         self.solar_unavailable_override = bool(data.get("solar_unavailable_override", False))
+        self.self_gen_reconnect_queue_enabled = bool(
+            data.get("self_gen_reconnect_queue_enabled", False)
+        )
+        self.auto_datalogger_restart_enabled = bool(
+            data.get("auto_datalogger_restart_enabled", False)
+        )
+        pending = data.get("pending_self_gen_reconnect")
+        if isinstance(pending, dict) and self._pending_self_gen_reconnect_is_valid(pending):
+            self._pending_self_gen_reconnect = {
+                "requested_at": str(pending["requested_at"]),
+                "expires_at": str(pending["expires_at"]),
+            }
         if self.overnight_charging_mode == OVERNIGHT_CHARGE_MODE_DISABLED:
             self._set_overnight_off_status()
 
@@ -526,12 +554,176 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "manual_off_peak_start": self.manual_off_peak_start,
             "manual_off_peak_end": self.manual_off_peak_end,
             "solar_unavailable_override": bool(self.solar_unavailable_override),
+            "self_gen_reconnect_queue_enabled": bool(self.self_gen_reconnect_queue_enabled),
+            "auto_datalogger_restart_enabled": bool(
+                self.auto_datalogger_restart_enabled
+            ),
+            "pending_self_gen_reconnect": self._pending_self_gen_reconnect,
         }
         data.update(updates)
         try:
             await self._runtime_store.async_save(data)
         except OSError as exc:
             _LOGGER.warning("Could not save AECC runtime config: %s", exc)
+
+    def _sync_auto_datalogger_restart_task(self) -> None:
+        """Start or cancel the fixed three-hour restart loop."""
+        task = self._auto_datalogger_restart_task
+        if not self.auto_datalogger_restart_enabled:
+            self.next_datalogger_restart_at = None
+            if task is not None and not task.done():
+                task.cancel()
+            self._auto_datalogger_restart_task = None
+            return
+        if task is not None and not task.done():
+            return
+        self._auto_datalogger_restart_task = self.hass.async_create_task(
+            self._async_auto_datalogger_restart_loop()
+        )
+
+    async def _async_auto_datalogger_restart_loop(self) -> None:
+        """Restart the datalogger every three hours while explicitly enabled."""
+        try:
+            while self.auto_datalogger_restart_enabled:
+                self.next_datalogger_restart_at = (
+                    datetime.now(UTC) + _DATALOGGER_AUTO_RESTART_INTERVAL
+                )
+                await asyncio.sleep(_DATALOGGER_AUTO_RESTART_INTERVAL.total_seconds())
+                if self.auto_datalogger_restart_enabled:
+                    try:
+                        await self.async_restart_datalogger(reason="automatic")
+                    except Exception:
+                        _LOGGER.exception(
+                            "Automatic datalogger restart failed unexpectedly"
+                        )
+        finally:
+            self.next_datalogger_restart_at = None
+
+    async def async_set_auto_datalogger_restart_enabled(self, enabled: bool) -> None:
+        """Persist and apply the opt-in three-hour restart setting."""
+        self.auto_datalogger_restart_enabled = bool(enabled)
+        await self.async_save_runtime_preferences()
+        self._sync_auto_datalogger_restart_task()
+        self.async_set_updated_data(self.data or {})
+        _LOGGER.info(
+            "Automatic three-hour datalogger restart %s",
+            "enabled" if self.auto_datalogger_restart_enabled else "disabled",
+        )
+
+    async def async_restart_datalogger(self, *, reason: str) -> bool:
+        """Dispatch one local restart, serialising manual and scheduled calls."""
+        async with self._datalogger_restart_lock:
+            dispatched = await self.client.restart_datalogger()
+            self.last_datalogger_restart_at = datetime.now(UTC)
+            self.last_datalogger_restart_reason = reason
+            self.last_datalogger_restart_dispatched = dispatched
+            self.async_set_updated_data(self.data or {})
+            if dispatched:
+                _LOGGER.warning(
+                    "AECC datalogger restart dispatched (%s); temporary local "
+                    "unavailability is expected",
+                    reason,
+                )
+            else:
+                _LOGGER.error("AECC datalogger restart could not be dispatched (%s)", reason)
+            return dispatched
+
+    async def async_shutdown(self) -> None:
+        """Cancel integration-owned background work before unloading."""
+        tasks = [
+            task
+            for task in (self._auto_datalogger_restart_task, self._overnight_task)
+            if task is not None and not task.done()
+        ]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._auto_datalogger_restart_task = None
+        self._overnight_task = None
+
+    @staticmethod
+    def _pending_self_gen_reconnect_is_valid(pending: dict[str, Any]) -> bool:
+        """Return whether a stored reconnect request has a future expiry."""
+        requested_at = pending.get("requested_at")
+        expires_at = pending.get("expires_at")
+        if not isinstance(requested_at, str) or not isinstance(expires_at, str):
+            return False
+        try:
+            expires = datetime.fromisoformat(expires_at)
+        except ValueError:
+            return False
+        if expires.tzinfo is None:
+            return False
+        return expires > datetime.now(UTC)
+
+    @property
+    def pending_self_gen_reconnect(self) -> dict[str, str] | None:
+        """The one pending manual Self-Gen reconnect action, if any."""
+        if self._pending_self_gen_reconnect is None:
+            return None
+        return dict(self._pending_self_gen_reconnect)
+
+    async def async_set_self_gen_reconnect_queue_enabled(self, enabled: bool) -> None:
+        """Enable/disable the opt-in queue, cancelling a queue when disabled."""
+        self.self_gen_reconnect_queue_enabled = bool(enabled)
+        if not self.self_gen_reconnect_queue_enabled:
+            self._pending_self_gen_reconnect = None
+        await self.async_save_runtime_preferences()
+
+    async def async_queue_self_gen_on_reconnect(self) -> bool:
+        """Persist one manual Self-Gen request for a later successful poll."""
+        if not self.self_gen_reconnect_queue_enabled:
+            return False
+        now = datetime.now(UTC)
+        self._pending_self_gen_reconnect = {
+            "requested_at": now.isoformat(),
+            "expires_at": (now + _SELF_GEN_RECONNECT_QUEUE_TTL).isoformat(),
+        }
+        await self.async_save_runtime_preferences()
+        _LOGGER.warning(
+            "Queued manual Self-Gen/Zero Export restore until %s after battery reconnect",
+            self._pending_self_gen_reconnect["expires_at"],
+        )
+        return True
+
+    async def async_cancel_pending_self_gen_reconnect(self) -> None:
+        """Cancel a queued mode restore after any new manual mode request."""
+        if self._pending_self_gen_reconnect is None:
+            return
+        self._pending_self_gen_reconnect = None
+        await self.async_save_runtime_preferences()
+        _LOGGER.info("Cancelled pending Self-Gen/Zero Export reconnect restore")
+
+    async def _async_maybe_apply_pending_self_gen_reconnect(self) -> None:
+        """Apply the opt-in restore once a healthy poll has re-established contact."""
+        pending = self._pending_self_gen_reconnect
+        if pending is None:
+            return
+        if not self.self_gen_reconnect_queue_enabled:
+            await self.async_cancel_pending_self_gen_reconnect()
+            return
+        if not self._pending_self_gen_reconnect_is_valid(pending):
+            self._pending_self_gen_reconnect = None
+            await self.async_save_runtime_preferences()
+            _LOGGER.info("Expired pending Self-Gen/Zero Export reconnect restore")
+            return
+        # A valid energy poll has already completed.  Require the observed
+        # storage bank to be stable too, avoiding a command while a PS240 is
+        # still recovering and reporting a transient topology.
+        if self._storage_topology_stable_polls < 2:
+            return
+        _LOGGER.info("Applying queued manual Self-Gen/Zero Export restore after reconnect")
+        success = await self.async_set_work_mode(MODE_SELF_CONSUMPTION)
+        if not success:
+            _LOGGER.warning("Queued Self-Gen/Zero Export restore was not acknowledged; will retry before expiry")
+            return
+        self._commanded_direction = "Idle"
+        self._commanded_work_mode = MODE_SELF_CONSUMPTION
+        self.commanded_operating_mode = "Self-Gen/Zero Export"
+        self._pending_self_gen_reconnect = None
+        await self.async_save_runtime_preferences()
+        _LOGGER.info("Queued Self-Gen/Zero Export restore applied and verified")
 
     # ── Public access to commanded state (used by entity platforms) ──────────
 
