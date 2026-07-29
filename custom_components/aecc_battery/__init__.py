@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-from math import isfinite
 from datetime import UTC, datetime
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -33,8 +33,8 @@ from .const import (
     DEFAULT_BRAND_PROFILE,
     DEFAULT_OFF_PEAK_END,
     DEFAULT_OFF_PEAK_START,
-    DEFAULT_TARIFF_PRESET,
     DEFAULT_OVERNIGHT_CHARGE_MODE,
+    DEFAULT_TARIFF_PRESET,
     DEFAULT_TIMEOUT,
     DOMAIN,
 )
@@ -45,7 +45,14 @@ from .tcp_manager import TCPClientManager
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.SENSOR, Platform.NUMBER, Platform.SELECT, Platform.TIME]
+PLATFORMS = [
+    Platform.SENSOR,
+    Platform.NUMBER,
+    Platform.SELECT,
+    Platform.TIME,
+    Platform.SWITCH,
+    Platform.BUTTON,
+]
 
 SERVICE_SNAPSHOT_CONTROL_REGISTERS = "snapshot_control_registers"
 SERVICE_SNAPSHOT_EXPORT_REGISTERS = "snapshot_export_registers"
@@ -390,6 +397,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         coordinator: AeccBatteryCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        await coordinator.async_shutdown()
         await coordinator.client.async_disconnect()
         TCPClientManager.remove_instance(entry.data[CONF_HOST], entry.data[CONF_PORT])
     return unloaded

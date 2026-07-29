@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.10-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.11-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe, view-only Octopus Agile battery planner.
@@ -39,6 +39,7 @@ compatible. This fork appears in Home Assistant as **AFERIY PS240 Agile**.
 - Household-demand-aware planning based on an anonymized half-hour profile
 - Connection health and last-command result sensors
 - Optional one-hour manual Self-Gen restore queue for PS240 Wi-Fi outages
+- Local data logger restart button and opt-in three-hour automatic restart
 - Grid meter agreement and charging reason diagnostics
 
 ## Before You Install
@@ -101,6 +102,19 @@ Selecting any other manual operating mode cancels the queued request. The queue
 never replays Charge, Discharge or Feed, and it is completely separate from the
 view-only Agile Proposed Plan.
 
+### Restart the data logger locally
+
+The device's configuration entities include `Restart Data Logger` and
+`Automatic Data Logger Restart`. The button sends one restart immediately over
+the existing local TCP connection. The switch is off by default; when enabled,
+it persists the choice and repeats the restart every three hours while Home
+Assistant is running. Turning the switch off cancels the pending restart.
+
+The restart applies to the Wi-Fi/BLE data logger, not the PS240 battery power
+electronics. Its local connection should disappear briefly after each command
+and polling will reconnect automatically. Do not use the control during a
+firmware update or while changing the logger's network settings.
+
 System-level readings are reported through the master. System Average Battery SOC is the main multi-unit SOC source and matches the behaviour shown in the AEC Cloud app.
 
 The integration creates generic `Battery 1 SOC`, `Battery 2 SOC`, and similar entities from the local `Storage_list` entries reported by the master. This avoids tying dashboards to a particular serial number when a unit is replaced.
@@ -159,7 +173,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.10`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.11`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 

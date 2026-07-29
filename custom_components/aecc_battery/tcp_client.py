@@ -12,6 +12,7 @@ from .tcp_manager import TCPClientManager
 _LOGGER = logging.getLogger(__name__)
 
 _GET_TIMEOUT = 10
+_RESTART_RESPONSE_TIMEOUT = 2
 
 _SAFE_DEVICE_MANAGEMENT_REGISTERS = [
     8,    # Master serial
@@ -112,6 +113,60 @@ class AeccTcpClient:
             except (json.JSONDecodeError, UnicodeDecodeError, ValueError, KeyError) as exc:
                 _LOGGER.debug("DeviceManagement probe error: %s", exc)
                 return None
+
+    async def restart_datalogger(self) -> bool:
+        """Send the local DeviceManagement restart command.
+
+        DeviceManagement reads use ``RegDeviceManagementAddr``; the matching
+        local write field is ``DeviceManagementAddr``. Register 32 is the
+        datalogger restart parameter used by the AECC app. A successful restart
+        commonly closes the socket before an acknowledgement can be returned,
+        so a completed write is considered a successful dispatch.
+        """
+        payload: dict[str, Any] = {
+            "Set": "DeviceManagement",
+            "SerialNumber": self._next_serial(),
+            "CommandSource": "HA",
+            "DeviceManagementAddr": {"32": "1"},
+        }
+        dispatched = False
+        async with self._io_lock:
+            try:
+                reader, writer = await self._manager.get_reader_writer()
+                self._connected = True
+                _LOGGER.info("Sending local datalogger restart command")
+                writer.write((json.dumps(payload) + "\n").encode("utf-8"))
+                await writer.drain()
+                dispatched = True
+
+                try:
+                    async with asyncio.timeout(_RESTART_RESPONSE_TIMEOUT):
+                        response = await self._read_json(reader)
+                    _LOGGER.debug("Datalogger restart response: %s", response)
+                except (
+                    TimeoutError,
+                    ConnectionResetError,
+                    OSError,
+                    asyncio.IncompleteReadError,
+                    json.JSONDecodeError,
+                    UnicodeDecodeError,
+                    ValueError,
+                ):
+                    _LOGGER.debug(
+                        "Datalogger disconnected after restart command (expected)"
+                    )
+            except (TimeoutError, ConnectionResetError, OSError) as exc:
+                _LOGGER.warning("Could not dispatch datalogger restart: %s", exc)
+                return False
+            finally:
+                if dispatched:
+                    # Never leave the shared manager holding the socket that the
+                    # restarting logger is about to close. The next poll opens a
+                    # fresh connection automatically.
+                    await self._manager.close()
+                    self._connected = False
+
+        return dispatched
 
     # ── Low-level ──────────────────────────────────────────────────────────
 

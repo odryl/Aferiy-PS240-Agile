@@ -69,6 +69,7 @@ _DUPLICATE_WRITE_PREFIXES = (
     "work_mode(",
 )
 _DEVICE_MANAGEMENT_REFRESH_INTERVAL = timedelta(minutes=30)
+_DATALOGGER_AUTO_RESTART_INTERVAL = timedelta(hours=3)
 _MORNING_TRACKER_MIN_UPDATE_SOC = 0.2
 _ADAPTIVE_MORNING_CREDIT_MIN = -0.15
 _ADAPTIVE_MORNING_CREDIT_MAX = 0.15
@@ -183,6 +184,13 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # the charge/discharge/feed commands.
         self.self_gen_reconnect_queue_enabled: bool = False
         self._pending_self_gen_reconnect: dict[str, str] | None = None
+        self.auto_datalogger_restart_enabled: bool = False
+        self.next_datalogger_restart_at: datetime | None = None
+        self.last_datalogger_restart_at: datetime | None = None
+        self.last_datalogger_restart_reason: str | None = None
+        self.last_datalogger_restart_dispatched: bool | None = None
+        self._auto_datalogger_restart_task: asyncio.Task | None = None
+        self._datalogger_restart_lock = asyncio.Lock()
         self._manufacturer = manufacturer
         self._model = model
         self._consecutive_failures: int = 0
@@ -316,6 +324,7 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_setup(self) -> None:
         await self.client.async_connect()
         await self.async_load_runtime_preferences()
+        self._sync_auto_datalogger_restart_task()
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
@@ -510,6 +519,9 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.self_gen_reconnect_queue_enabled = bool(
             data.get("self_gen_reconnect_queue_enabled", False)
         )
+        self.auto_datalogger_restart_enabled = bool(
+            data.get("auto_datalogger_restart_enabled", False)
+        )
         pending = data.get("pending_self_gen_reconnect")
         if isinstance(pending, dict) and self._pending_self_gen_reconnect_is_valid(pending):
             self._pending_self_gen_reconnect = {
@@ -543,6 +555,9 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "manual_off_peak_end": self.manual_off_peak_end,
             "solar_unavailable_override": bool(self.solar_unavailable_override),
             "self_gen_reconnect_queue_enabled": bool(self.self_gen_reconnect_queue_enabled),
+            "auto_datalogger_restart_enabled": bool(
+                self.auto_datalogger_restart_enabled
+            ),
             "pending_self_gen_reconnect": self._pending_self_gen_reconnect,
         }
         data.update(updates)
@@ -550,6 +565,82 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._runtime_store.async_save(data)
         except OSError as exc:
             _LOGGER.warning("Could not save AECC runtime config: %s", exc)
+
+    def _sync_auto_datalogger_restart_task(self) -> None:
+        """Start or cancel the fixed three-hour restart loop."""
+        task = self._auto_datalogger_restart_task
+        if not self.auto_datalogger_restart_enabled:
+            self.next_datalogger_restart_at = None
+            if task is not None and not task.done():
+                task.cancel()
+            self._auto_datalogger_restart_task = None
+            return
+        if task is not None and not task.done():
+            return
+        self._auto_datalogger_restart_task = self.hass.async_create_task(
+            self._async_auto_datalogger_restart_loop()
+        )
+
+    async def _async_auto_datalogger_restart_loop(self) -> None:
+        """Restart the datalogger every three hours while explicitly enabled."""
+        try:
+            while self.auto_datalogger_restart_enabled:
+                self.next_datalogger_restart_at = (
+                    datetime.now(UTC) + _DATALOGGER_AUTO_RESTART_INTERVAL
+                )
+                await asyncio.sleep(_DATALOGGER_AUTO_RESTART_INTERVAL.total_seconds())
+                if self.auto_datalogger_restart_enabled:
+                    try:
+                        await self.async_restart_datalogger(reason="automatic")
+                    except Exception:
+                        _LOGGER.exception(
+                            "Automatic datalogger restart failed unexpectedly"
+                        )
+        finally:
+            self.next_datalogger_restart_at = None
+
+    async def async_set_auto_datalogger_restart_enabled(self, enabled: bool) -> None:
+        """Persist and apply the opt-in three-hour restart setting."""
+        self.auto_datalogger_restart_enabled = bool(enabled)
+        await self.async_save_runtime_preferences()
+        self._sync_auto_datalogger_restart_task()
+        self.async_set_updated_data(self.data or {})
+        _LOGGER.info(
+            "Automatic three-hour datalogger restart %s",
+            "enabled" if self.auto_datalogger_restart_enabled else "disabled",
+        )
+
+    async def async_restart_datalogger(self, *, reason: str) -> bool:
+        """Dispatch one local restart, serialising manual and scheduled calls."""
+        async with self._datalogger_restart_lock:
+            dispatched = await self.client.restart_datalogger()
+            self.last_datalogger_restart_at = datetime.now(UTC)
+            self.last_datalogger_restart_reason = reason
+            self.last_datalogger_restart_dispatched = dispatched
+            self.async_set_updated_data(self.data or {})
+            if dispatched:
+                _LOGGER.warning(
+                    "AECC datalogger restart dispatched (%s); temporary local "
+                    "unavailability is expected",
+                    reason,
+                )
+            else:
+                _LOGGER.error("AECC datalogger restart could not be dispatched (%s)", reason)
+            return dispatched
+
+    async def async_shutdown(self) -> None:
+        """Cancel integration-owned background work before unloading."""
+        tasks = [
+            task
+            for task in (self._auto_datalogger_restart_task, self._overnight_task)
+            if task is not None and not task.done()
+        ]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._auto_datalogger_restart_task = None
+        self._overnight_task = None
 
     @staticmethod
     def _pending_self_gen_reconnect_is_valid(pending: dict[str, Any]) -> bool:

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.11
+
+- Added a local `Restart Data Logger` button that sends datalogger parameter
+  `32 = 1` over the existing Wi-Fi TCP connection. A disconnect immediately
+  after dispatch is expected while the logger reboots.
+- Added an opt-in, persisted `Automatic Data Logger Restart` switch. When on,
+  it repeats the same local restart every three hours; it is off by default and
+  exposes its next/last dispatch details as entity attributes.
+- Cancel the integration's background tasks cleanly when an entry is unloaded.
+
 ## 1.8.10
 
 - Added an opt-in, persisted Self-Gen reconnect queue for manual use when the
