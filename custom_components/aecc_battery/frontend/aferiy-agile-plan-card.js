@@ -1,8 +1,15 @@
 class AferiyAgilePlanCard extends HTMLElement {
   setConfig(config) {
-    this.config = config || {};
-    this._renderSignature = null;
-    if (this._hass) this._renderIfNeeded(true);
+    const nextConfig = config || {};
+    const nextSignature = JSON.stringify(nextConfig);
+    const configChanged = nextSignature !== this._configSignature;
+    this.config = nextConfig;
+    this._configSignature = nextSignature;
+    if (configChanged) {
+      this._renderSignature = null;
+      this._openTimelines = null;
+      if (this._hass) this._renderIfNeeded(true);
+    }
   }
 
   set hass(hass) {
@@ -30,14 +37,41 @@ class AferiyAgilePlanCard extends HTMLElement {
     const signature = JSON.stringify([
       today?.entity_id,
       today?.state,
-      today?.last_updated,
+      today?.attributes,
       tomorrow?.entity_id,
       tomorrow?.state,
-      tomorrow?.last_updated,
+      tomorrow?.attributes,
     ]);
     if (!force && signature === this._renderSignature) return;
     this._renderSignature = signature;
     this.render(today, tomorrow);
+  }
+
+  _timelineStorageKey() {
+    return `aferiy-agile-plan-card:open:${this.config.today_entity || "auto"}:${this.config.tomorrow_entity || "auto"}:${this.config.title || "default"}`;
+  }
+
+  _loadOpenTimelines() {
+    if (this._openTimelines) return;
+    this._openTimelines = new Set();
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(this._timelineStorageKey()) || "[]");
+      if (Array.isArray(saved)) this._openTimelines = new Set(saved);
+    } catch (_error) {
+      // Storage can be unavailable in privacy-restricted WebViews; in-memory
+      // state still preserves expansion during this card instance's lifetime.
+    }
+  }
+
+  _saveOpenTimelines() {
+    try {
+      window.sessionStorage.setItem(
+        this._timelineStorageKey(),
+        JSON.stringify(Array.from(this._openTimelines)),
+      );
+    } catch (_error) {
+      // Keep the card usable when browser storage is unavailable.
+    }
   }
 
   _escape(value) {
@@ -177,10 +211,11 @@ class AferiyAgilePlanCard extends HTMLElement {
 
   render(today, tomorrow) {
     if (!this._hass) return;
-    const openTimelines = new Set(
-      Array.from(this.querySelectorAll("details[data-timeline][open]"))
-        .map((details) => details.dataset.timeline),
-    );
+    this._loadOpenTimelines();
+    this.querySelectorAll("details[data-timeline]").forEach((details) => {
+      if (details.open) this._openTimelines.add(details.dataset.timeline);
+      else this._openTimelines.delete(details.dataset.timeline);
+    });
     this.innerHTML = `<ha-card>
       <style>
         ha-card { padding: 16px; overflow: hidden; }
@@ -221,7 +256,12 @@ class AferiyAgilePlanCard extends HTMLElement {
       ${this._day(tomorrow, "Tomorrow")}
     </ha-card>`;
     this.querySelectorAll("details[data-timeline]").forEach((details) => {
-      details.open = openTimelines.has(details.dataset.timeline);
+      details.open = this._openTimelines.has(details.dataset.timeline);
+      details.addEventListener("toggle", () => {
+        if (details.open) this._openTimelines.add(details.dataset.timeline);
+        else this._openTimelines.delete(details.dataset.timeline);
+        this._saveOpenTimelines();
+      });
     });
   }
 }

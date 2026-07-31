@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Persist expanded Agile price tables across equivalent Lovelace configuration
+  calls, meaningful plan refreshes, and card-element recreation within the same
+  browser session. Ignore timestamp-only plan entity updates.
+
 ## 1.8.12
 
 - Exclude the 23:30-midnight period from pre-16:00 charging and next-day

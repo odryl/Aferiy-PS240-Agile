@@ -114,5 +114,9 @@ def test_card_discovers_entities_and_exposes_energy_costs_and_savings() -> None:
 def test_card_avoids_unrelated_renders_and_preserves_open_rate_tables() -> None:
     assert "_renderIfNeeded()" in CARD_SOURCE
     assert "signature === this._renderSignature" in CARD_SOURCE
-    assert 'details[data-timeline][open]' in CARD_SOURCE
-    assert "details.open = openTimelines.has(details.dataset.timeline)" in CARD_SOURCE
+    assert "nextSignature !== this._configSignature" in CARD_SOURCE
+    assert "today?.attributes" in CARD_SOURCE
+    assert "today?.last_updated" not in CARD_SOURCE
+    assert "window.sessionStorage" in CARD_SOURCE
+    assert "details.open = this._openTimelines.has(details.dataset.timeline)" in CARD_SOURCE
+    assert 'details.addEventListener("toggle"' in CARD_SOURCE
