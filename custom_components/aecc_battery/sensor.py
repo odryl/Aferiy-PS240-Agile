@@ -686,8 +686,14 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
     def _async_rate_state_changed(self, event: Event) -> None:
         entity_id = str(event.data.get("entity_id") or "")
         configured = self._configured_source_entity_id()
-        if entity_id == configured or (
+        counterpart = self._counterpart_source_entity_id()
+        if entity_id in (configured, counterpart) or (
             not configured and entity_id.endswith(self._source_suffix())
+        ) or (
+            not counterpart
+            and entity_id.endswith(
+                "_next_day_rates" if self._day_kind == "current" else "_current_day_rates"
+            )
         ):
             self._cached_plan_key = None
             self.async_write_ha_state()
@@ -842,17 +848,70 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
         reserve_soc = float(getattr(self.coordinator, "_commanded_min_soc", 10))
         starting_soc = reserve_soc
         starting_soc_source = "conservative_reserve_assumption"
-        if self._day_kind == "current":
-            try:
-                live_soc = float(self.coordinator.get_value("average_battery_soc"))
-            except (TypeError, ValueError):
-                live_soc = None
-            if live_soc is not None and math.isfinite(live_soc):
-                starting_soc = live_soc
-                starting_soc_source = "live_system_average_battery_soc"
+        try:
+            live_soc = float(self.coordinator.get_value("average_battery_soc"))
+        except (TypeError, ValueError):
+            live_soc = None
+        if (
+            live_soc is not None
+            and math.isfinite(live_soc)
+            and self._day_kind == "current"
+        ):
+            starting_soc = live_soc
+            starting_soc_source = "live_system_average_battery_soc"
 
         local_now = now_utc.astimezone(ZoneInfo(self.hass.config.time_zone))
         expected_date = local_now.date() + timedelta(days=1 if self._day_kind == "next" else 0)
+        counterpart_rates = (
+            counterpart.attributes.get("rates")
+            if counterpart is not None
+            and counterpart.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE)
+            and isinstance(counterpart.attributes.get("rates"), list)
+            and counterpart.attributes.get("rates")
+            and now_utc - counterpart.last_updated.astimezone(UTC) <= timedelta(hours=36)
+            else None
+        )
+        ready_by = self._config_entry.options.get(
+            CONF_AGILE_READY_BY,
+            DEFAULT_AGILE_READY_BY,
+        )
+        protected_until = self._config_entry.options.get(
+            CONF_AGILE_PROTECTED_UNTIL,
+            DEFAULT_AGILE_PROTECTED_UNTIL,
+        )
+
+        # Once both days are published, carry Today's planned protection-end
+        # SOC into Tomorrow instead of resetting the horizon to the reserve.
+        if self._day_kind == "next" and counterpart_rates is not None:
+            today_starting_soc = (
+                live_soc
+                if live_soc is not None and math.isfinite(live_soc)
+                else reserve_soc
+            )
+            today_plan = build_agile_day_plan(
+                counterpart_rates,
+                timezone=self.hass.config.time_zone,
+                battery_capacity_kwh=self.coordinator.battery_capacity_kwh,
+                starting_soc=today_starting_soc,
+                reserve_soc=reserve_soc,
+                expected_date=local_now.date(),
+                now=now_utc,
+                demand_profile_kwh=AGILE_DEFAULT_DEMAND_PROFILE_KWH,
+                next_day_rates=raw_rates,
+                ready_by=ready_by,
+                protected_until=protected_until,
+                max_charge_power_w=AGILE_MAX_SYSTEM_CHARGE_POWER_W,
+                max_discharge_power_w=AGILE_MAX_SYSTEM_DISCHARGE_POWER_W,
+            )
+            projected_soc = today_plan.get("projected_soc_at_protection_end")
+            if (
+                today_plan.get("status") in ("proposed", "limited")
+                and isinstance(projected_soc, int | float)
+                and math.isfinite(float(projected_soc))
+            ):
+                starting_soc = max(reserve_soc, min(100.0, float(projected_soc)))
+                starting_soc_source = "today_projected_protection_end_soc"
+
         half_hour_bucket = now_utc.replace(
             minute=(now_utc.minute // 30) * 30,
             second=0,
@@ -861,16 +920,14 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
         cache_key = (
             source,
             state.last_updated,
+            counterpart.last_updated if counterpart_rates is not None else None,
             round(starting_soc, 1),
             round(reserve_soc, 1),
             round(float(self.coordinator.battery_capacity_kwh), 3),
             expected_date,
             half_hour_bucket,
-            self._config_entry.options.get(CONF_AGILE_READY_BY, DEFAULT_AGILE_READY_BY),
-            self._config_entry.options.get(
-                CONF_AGILE_PROTECTED_UNTIL,
-                DEFAULT_AGILE_PROTECTED_UNTIL,
-            ),
+            ready_by,
+            protected_until,
         )
         if self._cached_plan_key == cache_key and self._cached_plan is not None:
             return self._cached_plan
@@ -884,14 +941,9 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
             expected_date=expected_date,
             now=now_utc,
             demand_profile_kwh=AGILE_DEFAULT_DEMAND_PROFILE_KWH,
-            ready_by=self._config_entry.options.get(
-                CONF_AGILE_READY_BY,
-                DEFAULT_AGILE_READY_BY,
-            ),
-            protected_until=self._config_entry.options.get(
-                CONF_AGILE_PROTECTED_UNTIL,
-                DEFAULT_AGILE_PROTECTED_UNTIL,
-            ),
+            next_day_rates=counterpart_rates if self._day_kind == "current" else None,
+            ready_by=ready_by,
+            protected_until=protected_until,
             max_charge_power_w=AGILE_MAX_SYSTEM_CHARGE_POWER_W,
             max_discharge_power_w=AGILE_MAX_SYSTEM_DISCHARGE_POWER_W,
         )

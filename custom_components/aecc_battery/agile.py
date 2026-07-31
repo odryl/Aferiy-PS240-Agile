@@ -181,6 +181,7 @@ def build_agile_day_plan(
     expected_date: date | None = None,
     now: datetime | None = None,
     demand_profile_kwh: dict[str, float] | None = None,
+    next_day_rates: Any | None = None,
     target_soc: float = 100.0,
     ready_by: str = "16:00",
     protected_until: str = "22:00",
@@ -190,7 +191,12 @@ def build_agile_day_plan(
     discharge_efficiency: float = 0.95,
     minimum_saving_gbp_per_kwh: float = _DEFAULT_MINIMUM_SAVING_GBP_PER_KWH,
 ) -> dict[str, Any]:
-    """Build a feasible read-only daily plan; never control hardware."""
+    """Build a feasible read-only daily plan; never control hardware.
+
+    When a complete next-day payload is supplied, its pre-deadline prices are
+    used to value energy discharged today.  The returned slots remain limited
+    to ``expected_date`` so existing Today and Tomorrow entities stay stable.
+    """
     rates, parse_errors = parse_octopus_rates(raw_rates)
     if not rates:
         return _invalid_plan(
@@ -221,6 +227,46 @@ def build_agile_day_plan(
         return _invalid_plan("Ready-by and protection-end times must use HH:MM format.")
     if ready_time >= protected_time:
         return _invalid_plan("Protection end must be later than ready-by time.")
+    ready_at = datetime.combine(day, ready_time, tzinfo=local_zone)
+    protected_at = datetime.combine(day, protected_time, tzinfo=local_zone)
+
+    next_charge_rates: list[AgileRate] = []
+    next_rate_errors: list[str] = []
+    if next_day_rates is not None:
+        parsed_next_rates, next_parse_errors = parse_octopus_rates(next_day_rates)
+        next_day = day + timedelta(days=1)
+        if next_parse_errors:
+            next_rate_errors.extend(next_parse_errors)
+        elif not parsed_next_rates:
+            next_rate_errors.append("The next-day source entity has no rates list.")
+        elif parsed_next_rates[0].start.astimezone(local_zone).date() != next_day:
+            next_rate_errors.append(
+                "Next-day rate payload is not for the date immediately after this plan."
+            )
+        elif any(
+            rate.start.astimezone(local_zone).date() != next_day
+            for rate in parsed_next_rates
+        ):
+            next_rate_errors.append(
+                "Next-day rate payload contains periods outside the immediately following date."
+            )
+        else:
+            next_ready_at = datetime.combine(next_day, ready_time, tzinfo=local_zone)
+            _, next_coverage_errors = _validate_actionable_coverage(
+                parsed_next_rates,
+                expected_date=next_day,
+                local_zone=local_zone,
+                planning_time=datetime.combine(next_day, time.min, tzinfo=local_zone),
+                protected_until=ready_time,
+            )
+            next_rate_errors.extend(next_coverage_errors)
+            if not next_rate_errors:
+                next_charge_rates = [
+                    rate
+                    for rate in parsed_next_rates
+                    if rate.start.astimezone(local_zone).date() == next_day
+                    and rate.end.astimezone(local_zone) <= next_ready_at
+                ]
 
     expected_periods, coverage_errors = _validate_actionable_coverage(
         rates,
@@ -296,13 +342,13 @@ def build_agile_day_plan(
         rate
         for rate in rates
         if rate.start >= planning_time
-        and rate.end.astimezone(local_zone).time() <= ready_time
+        and rate.end.astimezone(local_zone) <= ready_at
     ]
     discharge_candidates = [
         rate
         for rate in rates
         if rate.start >= planning_time
-        and ready_time <= rate.start.astimezone(local_zone).time() < protected_time
+        and ready_at <= rate.start.astimezone(local_zone) < protected_at
     ]
 
     charge_grid_limit_kwh = max_charge_power_w / 1000 * 0.5
@@ -328,19 +374,41 @@ def build_agile_day_plan(
         rate.value_inc_vat * charge_energy_by_start.get(rate.start, 0.0) for rate in rates
     )
     average_charge_rate = charge_cost_total / charge_grid_kwh if charge_grid_kwh else None
-    replacement_charge_rate = (
-        average_charge_rate
-        if average_charge_rate is not None
-        else min((rate.value_inc_vat for rate in rates), default=None)
+    usable_discharge_kwh = (
+        capacity * max(0.0, projected_ready_soc - reserve) / 100 * discharge_efficiency
     )
+    replacement_rate_source = "same_day_planned_charge"
+    replacement_charge_rate = average_charge_rate
+    if next_charge_rates:
+        # Value today's maximum feasible discharge against the cheapest actual
+        # periods that can refill it tomorrow. This avoids treating a single
+        # unusually cheap half-hour as though it could replace the whole battery.
+        grid_energy_to_replace = usable_discharge_kwh / (
+            charge_efficiency * discharge_efficiency
+        )
+        remaining_grid_energy = grid_energy_to_replace
+        replacement_cost_total = 0.0
+        replacement_grid_energy = 0.0
+        for rate in sorted(next_charge_rates, key=lambda item: (item.value_inc_vat, item.start)):
+            if remaining_grid_energy <= 1e-9:
+                break
+            grid_energy = min(charge_grid_limit_kwh, remaining_grid_energy)
+            replacement_cost_total += grid_energy * rate.value_inc_vat
+            replacement_grid_energy += grid_energy
+            remaining_grid_energy -= grid_energy
+        if replacement_grid_energy > 0 and remaining_grid_energy <= 1e-6:
+            replacement_charge_rate = replacement_cost_total / replacement_grid_energy
+            replacement_rate_source = "next_day_published_rates"
+    if replacement_charge_rate is None:
+        replacement_charge_rate = min(
+            (rate.value_inc_vat for rate in future_rates),
+            default=None,
+        )
+        replacement_rate_source = "same_day_future_rate_fallback"
     delivered_replacement_cost = (
         replacement_charge_rate / (charge_efficiency * discharge_efficiency)
         if replacement_charge_rate is not None
         else None
-    )
-
-    usable_discharge_kwh = (
-        capacity * max(0.0, projected_ready_soc - reserve) / 100 * discharge_efficiency
     )
     profile_provided = demand_profile_kwh is not None
     if demand_profile_kwh is not None and not isinstance(demand_profile_kwh, dict):
@@ -389,6 +457,15 @@ def build_agile_day_plan(
         remaining_discharge_kwh -= energy
 
     planned_discharge_kwh = sum(discharge_energy_by_start.values())
+    projected_protection_end_soc = max(
+        reserve,
+        projected_ready_soc
+        - (
+            planned_discharge_kwh / discharge_efficiency / capacity * 100
+            if capacity
+            else 0.0
+        ),
+    )
     avoided_import_cost = sum(
         rate.value_inc_vat * discharge_energy_by_start.get(rate.start, 0.0) for rate in rates
     )
@@ -488,6 +565,7 @@ def build_agile_day_plan(
         "starting_soc": round(start_soc, 1),
         "target_soc": round(target, 1),
         "projected_soc_at_ready_by": round(projected_ready_soc, 1),
+        "projected_soc_at_protection_end": round(projected_protection_end_soc, 1),
         "reserve_soc": round(reserve, 1),
         "battery_capacity_kwh": round(capacity, 3),
         "max_system_charge_power_w": max_charge_power_w,
@@ -515,6 +593,9 @@ def build_agile_day_plan(
             if delivered_replacement_cost is not None
             else None
         ),
+        "replacement_rate_source": replacement_rate_source,
+        "next_day_rates_used": replacement_rate_source == "next_day_published_rates",
+        "next_day_rate_validation_errors": next_rate_errors,
         "minimum_saving_gbp_per_kwh": round(minimum_saving, 5),
         "estimated_grid_charge_cost_gbp": round(charge_cost_total, 2),
         "estimated_avoided_import_cost_gbp": round(avoided_import_cost, 2),

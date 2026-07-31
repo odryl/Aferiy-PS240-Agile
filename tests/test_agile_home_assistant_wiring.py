@@ -36,6 +36,13 @@ def test_sensor_passes_expected_day_time_and_demand_profile_to_planner() -> None
     assert "demand_profile_kwh=AGILE_DEFAULT_DEMAND_PROFILE_KWH" in SENSOR_SOURCE
 
 
+def test_sensor_replans_both_days_as_one_rolling_horizon_when_rates_exist() -> None:
+    assert 'next_day_rates=counterpart_rates if self._day_kind == "current" else None' in SENSOR_SOURCE
+    assert 'starting_soc_source = "today_projected_protection_end_soc"' in SENSOR_SOURCE
+    assert 'today_plan.get("projected_soc_at_protection_end")' in SENSOR_SOURCE
+    assert "counterpart.last_updated if counterpart_rates is not None else None" in SENSOR_SOURCE
+
+
 def test_agile_path_remains_shadow_only() -> None:
     agile_sensor = SENSOR_SOURCE.split("class AeccAgileProposedPlanSensor", 1)[1].split(
         "class AeccSensor",
@@ -97,5 +104,15 @@ def test_card_discovers_entities_and_exposes_energy_costs_and_savings() -> None:
     assert "highlimit" in CARD_SOURCE
     assert "rate.current" in CARD_SOURCE
     assert "All half-hour Agile prices" in CARD_SOURCE
+    assert "Rolling horizon active" in CARD_SOURCE
+    assert "projected_soc_at_protection_end" in CARD_SOURCE
+    assert "replacement_rate_source" in CARD_SOURCE
     assert '"_agile_proposed_plan_current"' not in CARD_SOURCE
     assert '"_agile_proposed_plan_next"' not in CARD_SOURCE
+
+
+def test_card_avoids_unrelated_renders_and_preserves_open_rate_tables() -> None:
+    assert "_renderIfNeeded()" in CARD_SOURCE
+    assert "signature === this._renderSignature" in CARD_SOURCE
+    assert 'details[data-timeline][open]' in CARD_SOURCE
+    assert "details.open = openTimelines.has(details.dataset.timeline)" in CARD_SOURCE

@@ -1,11 +1,13 @@
 class AferiyAgilePlanCard extends HTMLElement {
   setConfig(config) {
     this.config = config || {};
+    this._renderSignature = null;
+    if (this._hass) this._renderIfNeeded(true);
   }
 
   set hass(hass) {
     this._hass = hass;
-    this.render();
+    this._renderIfNeeded();
   }
 
   getCardSize() {
@@ -20,6 +22,22 @@ class AferiyAgilePlanCard extends HTMLElement {
         || state.attributes?.friendly_name?.endsWith(friendlyName)
       ),
     );
+  }
+
+  _renderIfNeeded(force = false) {
+    const today = this._find(this.config.today_entity, "_agile_proposed_plan_today", "Agile Proposed Plan Today");
+    const tomorrow = this._find(this.config.tomorrow_entity, "_agile_proposed_plan_tomorrow", "Agile Proposed Plan Tomorrow");
+    const signature = JSON.stringify([
+      today?.entity_id,
+      today?.state,
+      today?.last_updated,
+      tomorrow?.entity_id,
+      tomorrow?.state,
+      tomorrow?.last_updated,
+    ]);
+    if (!force && signature === this._renderSignature) return;
+    this._renderSignature = signature;
+    this.render(today, tomorrow);
   }
 
   _escape(value) {
@@ -97,10 +115,10 @@ class AferiyAgilePlanCard extends HTMLElement {
     </table></div>`;
   }
 
-  _rateTimeline(slots, cheapestRate) {
+  _rateTimeline(slots, cheapestRate, timelineKey) {
     if (!slots.length) return "";
     const now = Date.now();
-    return `<details><summary>All half-hour Agile prices</summary><div class="rates">
+    return `<details data-timeline="${this._escape(timelineKey)}"><summary>All half-hour Agile prices</summary><div class="rates">
       ${slots.map((slot) => {
         const current = this._isCurrent(slot, now);
         const tone = this._priceTone(slot.rate_gbp_per_kwh, cheapestRate);
@@ -118,6 +136,8 @@ class AferiyAgilePlanCard extends HTMLElement {
     const slots = attrs.slots || [];
     const statusClass = String(attrs.status || state.state).toLowerCase().replaceAll("_", "-");
     const conservativeTomorrow = attrs.starting_soc_source === "conservative_reserve_assumption";
+    const rollingToday = attrs.next_day_rates_used === true;
+    const rollingTomorrow = attrs.starting_soc_source === "today_projected_protection_end_soc";
     const cheapestRate = Number(attrs.lowest_future_rate_gbp_per_kwh);
     const currentRate = attrs.current_rate_gbp_per_kwh;
     const cheapestStart = slots.find((slot) => slot.start === attrs.lowest_future_rate_start)?.local_start || "—";
@@ -128,10 +148,13 @@ class AferiyAgilePlanCard extends HTMLElement {
       </div>
       <p class="reason">${this._escape(attrs.reason || "")}</p>
       ${conservativeTomorrow ? `<p class="notice">Tomorrow assumes the battery starts at its reserve SOC; the plan will refine when it becomes Today.</p>` : ""}
+      ${rollingToday ? `<p class="notice rolling">Rolling horizon active: tonight's discharge is valued against published refill prices tomorrow.</p>` : ""}
+      ${rollingTomorrow ? `<p class="notice rolling">Rolling horizon active: Tomorrow starts from Today's projected ${this._number(attrs.starting_soc, "%", 0)} SOC.</p>` : ""}
       <div class="metrics">
         ${this._metric("Current Agile price", `${this._rate(currentRate)}/kWh`, "price")}
         ${this._metric("Cheapest remaining", `${this._rate(attrs.lowest_future_rate_gbp_per_kwh)}/kWh · ${cheapestStart}`, "price")}
         ${this._metric("Battery SOC", `${this._number(attrs.starting_soc, "%", 0)} → ${this._number(attrs.projected_soc_at_ready_by, "%", 0)}`, "soc")}
+        ${this._metric(`SOC after protection`, this._number(attrs.projected_soc_at_protection_end, "%", 0), "soc")}
         ${this._metric(`Grid charge by ${attrs.ready_by || "16:00"}`, this._number(attrs.planned_grid_charge_kwh, " kWh", 2), "charge")}
         ${this._metric("Estimated charge cost", this._money(attrs.estimated_grid_charge_cost_gbp), "charge")}
         ${this._metric(`Discharge to ${attrs.protected_until || "22:00"}`, this._number(attrs.planned_discharge_kwh, " kWh", 2), "discharge")}
@@ -141,20 +164,23 @@ class AferiyAgilePlanCard extends HTMLElement {
       <div class="assumptions">
         <span>Charge avg ${this._rate(attrs.average_planned_charge_rate_gbp_per_kwh)}/kWh</span>
         <span>Discharged-energy replacement ${this._money(attrs.estimated_discharge_replacement_cost_gbp)} at ${this._rate(attrs.delivered_replacement_cost_gbp_per_kwh)}/kWh</span>
+        <span>Replacement prices: ${this._escape(attrs.replacement_rate_source === "next_day_published_rates" ? "published tomorrow" : "same day")}</span>
         <span>Reserve ${this._number(attrs.reserve_soc, "%", 0)}</span>
         <span>System limit ${this._number(attrs.max_system_discharge_power_w, " W", 0)}</span>
       </div>
       <h4>Charge and discharge schedule</h4>
       ${this._activeRows(slots)}
-      ${this._rateTimeline(slots, cheapestRate)}
+      ${this._rateTimeline(slots, cheapestRate, label.toLowerCase())}
       <p class="footnote">${this._escape(attrs.cost_estimate_note || "Costs are estimates, not a complete electricity bill.")}</p>
     </section>`;
   }
 
-  render() {
+  render(today, tomorrow) {
     if (!this._hass) return;
-    const today = this._find(this.config.today_entity, "_agile_proposed_plan_today", "Agile Proposed Plan Today");
-    const tomorrow = this._find(this.config.tomorrow_entity, "_agile_proposed_plan_tomorrow", "Agile Proposed Plan Tomorrow");
+    const openTimelines = new Set(
+      Array.from(this.querySelectorAll("details[data-timeline][open]"))
+        .map((details) => details.dataset.timeline),
+    );
     this.innerHTML = `<ha-card>
       <style>
         ha-card { padding: 16px; overflow: hidden; }
@@ -166,6 +192,7 @@ class AferiyAgilePlanCard extends HTMLElement {
         .status { border-radius: 999px; background: var(--secondary-background-color); padding: 5px 9px; font-size: 12px; font-weight: 700; }
         .status.proposed { color: var(--success-color, #2e7d32); } .status.invalid, .status.limited { color: var(--error-color, #c62828); }
         .notice { margin-top: 10px; padding: 9px; border-left: 3px solid var(--warning-color, #f9a825); background: var(--secondary-background-color); font-size: 12px; }
+        .notice.rolling { border-left-color: var(--success-color, #43a047); }
         .metrics { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 8px; margin: 14px 0 9px; }
         .metric { background: var(--secondary-background-color); border-radius: 10px; padding: 10px; border-left: 3px solid var(--divider-color); }
         .metric span { display: block; color: var(--secondary-text-color); font-size: 11px; margin-bottom: 4px; }
@@ -193,6 +220,9 @@ class AferiyAgilePlanCard extends HTMLElement {
       ${this._day(today, "Today")}
       ${this._day(tomorrow, "Tomorrow")}
     </ha-card>`;
+    this.querySelectorAll("details[data-timeline]").forEach((details) => {
+      details.open = openTimelines.has(details.dataset.timeline);
+    });
   }
 }
 

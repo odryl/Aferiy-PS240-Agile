@@ -92,6 +92,28 @@ def test_today_never_selects_elapsed_periods() -> None:
     assert all(datetime.fromisoformat(slot["start"]) >= now for slot in active)
 
 
+def test_midnight_ending_slot_is_not_mistaken_for_pre_deadline_charge() -> None:
+    raw_rates = _rates("2026-07-27")
+    raw_rates[-1]["value_inc_vat"] = -1.0
+    now = datetime(2026, 7, 27, 18, 0, tzinfo=ZoneInfo("Europe/London"))
+
+    plan = AGILE.build_agile_day_plan(
+        raw_rates,
+        timezone="Europe/London",
+        battery_capacity_kwh=1.958,
+        starting_soc=66,
+        reserve_soc=15,
+        expected_date=date(2026, 7, 27),
+        now=now,
+    )
+
+    assert plan["planned_grid_charge_kwh"] == 0
+    assert not any(
+        slot["local_start"] == "23:30" and slot["action"] == "charge"
+        for slot in plan["slots"]
+    )
+
+
 def test_current_day_can_omit_elapsed_periods_when_all_actionable_periods_exist() -> None:
     raw_rates = _rates("2026-07-27")[2:]
     now = datetime(2026, 7, 27, 1, 15, tzinfo=ZoneInfo("Europe/London"))
@@ -185,6 +207,109 @@ def test_unprofitable_periods_are_not_discharged() -> None:
 
     assert plan["discharge_periods"] == 0
     assert plan["planned_discharge_kwh"] == 0
+
+
+def test_published_tomorrow_rates_value_tonights_discharge() -> None:
+    today_rates = _rates("2026-07-27", protected_rate=0.25)
+    for rate in today_rates:
+        if datetime.fromisoformat(str(rate["start"])).astimezone(
+            ZoneInfo("Europe/London")
+        ).hour >= 16:
+            rate["value_inc_vat"] = 0.25
+    tomorrow_rates = _rates("2026-07-28")
+    now = datetime(2026, 7, 27, 16, 0, tzinfo=ZoneInfo("Europe/London"))
+
+    same_day_only = AGILE.build_agile_day_plan(
+        today_rates,
+        timezone="Europe/London",
+        battery_capacity_kwh=5.874,
+        starting_soc=100,
+        reserve_soc=10,
+        expected_date=date(2026, 7, 27),
+        now=now,
+    )
+    rolling = AGILE.build_agile_day_plan(
+        today_rates,
+        timezone="Europe/London",
+        battery_capacity_kwh=5.874,
+        starting_soc=100,
+        reserve_soc=10,
+        expected_date=date(2026, 7, 27),
+        now=now,
+        next_day_rates=tomorrow_rates,
+    )
+
+    assert same_day_only["planned_discharge_kwh"] == 0
+    assert rolling["planned_discharge_kwh"] > 0
+    assert rolling["next_day_rates_used"] is True
+    assert rolling["replacement_rate_source"] == "next_day_published_rates"
+    assert rolling["projected_soc_at_protection_end"] < rolling["starting_soc"]
+
+
+def test_invalid_or_non_contiguous_tomorrow_rates_are_ignored_safely() -> None:
+    plan = _plan(next_day_rates=_rates("2026-07-30"))
+
+    assert plan["status"] == "proposed"
+    assert plan["next_day_rates_used"] is False
+    assert plan["next_day_rate_validation_errors"]
+
+
+def test_tomorrow_payload_with_appended_later_day_is_rejected() -> None:
+    tomorrow_rates = _rates("2026-07-28")
+    later_rates = _rates("2026-07-29")
+    for rate in later_rates:
+        rate["value_inc_vat"] = 0.001
+
+    plan = _plan(next_day_rates=tomorrow_rates + later_rates)
+
+    assert plan["next_day_rates_used"] is False
+    assert any(
+        "outside the immediately following date" in error
+        for error in plan["next_day_rate_validation_errors"]
+    )
+
+
+def test_tomorrow_midnight_ending_slot_is_not_used_as_refill_price() -> None:
+    today_rates = _rates("2026-07-27", protected_rate=0.25)
+    tomorrow_rates = _rates("2026-07-28")
+    for rate in tomorrow_rates:
+        rate["value_inc_vat"] = 0.20
+    tomorrow_rates[-1]["value_inc_vat"] = -1.0
+    now = datetime(2026, 7, 27, 16, 0, tzinfo=ZoneInfo("Europe/London"))
+
+    plan = AGILE.build_agile_day_plan(
+        today_rates,
+        timezone="Europe/London",
+        battery_capacity_kwh=1.958,
+        starting_soc=100,
+        reserve_soc=15,
+        expected_date=date(2026, 7, 27),
+        now=now,
+        next_day_rates=tomorrow_rates,
+    )
+
+    assert plan["next_day_rates_used"] is True
+    assert plan["delivered_replacement_cost_gbp_per_kwh"] > 0.20
+
+
+def test_incomplete_tomorrow_payload_is_not_used_for_replacement_prices() -> None:
+    tomorrow_rates = _rates("2026-07-28")
+    del tomorrow_rates[10]
+
+    plan = _plan(next_day_rates=tomorrow_rates)
+
+    assert plan["next_day_rates_used"] is False
+    assert plan["next_day_rate_validation_errors"]
+
+
+def test_rolling_horizon_accepts_dst_transition_days() -> None:
+    spring = _plan("2026-03-28", next_day_rates=_rates("2026-03-29"))
+    autumn = _plan("2026-10-24", next_day_rates=_rates("2026-10-25"))
+
+    assert spring["next_day_rates_used"] is True
+    assert spring["next_day_rate_validation_errors"] == []
+    assert autumn["next_day_rates_used"] is True
+    assert autumn["next_day_rate_validation_errors"] == []
 
 
 def test_octopus_source_metadata_is_validated_behaviorally() -> None:

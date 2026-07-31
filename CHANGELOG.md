@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Exclude the 23:30-midnight period from pre-16:00 charging and next-day
+  replacement pricing; its `00:00` end clock previously crossed a date boundary
+  and could be mistaken for a pre-deadline slot.
+- Keep opened half-hour price tables expanded across Agile plan refreshes and
+  avoid rebuilding the card for unrelated Home Assistant state updates.
+- Couple Today and Tomorrow into a rolling Agile planning horizon as soon as
+  tomorrow's complete rates are published. Tonight's discharge is valued
+  against the cheapest sufficient set of tomorrow refill periods, and
+  Tomorrow starts from Today's projected protection-end SOC.
+- Keep the current independent-day fallback when tomorrow's rates are absent,
+  stale, malformed, incomplete, or not for the immediately following date.
+
 ## 1.8.11
 
 - Added a local `Restart Data Logger` button that sends datalogger parameter

@@ -25,8 +25,11 @@ The planner enforces these invariants:
 - non-finite battery, efficiency, price, or demand inputs invalidate the plan
 - missing periods in a supplied demand profile contribute zero planned demand
 
-Tomorrow's plan assumes the battery begins at its reserve SOC. This is
-deliberately conservative. Today's plan uses live System Average Battery SOC
+Before next-day rates are published, Tomorrow's plan assumes the battery begins
+at its reserve SOC. Once both valid days are available, Today values discharge
+against enough of tomorrow's cheapest pre-deadline periods to refill the
+maximum feasible discharged energy. Tomorrow then begins at Today's projected
+SOC at the protection end. Today's plan uses live System Average Battery SOC
 when available. Both plans use the configured battery capacity.
 
 BottlecapDave rate values are treated as GBP/kWh. The supplied raw consumption
@@ -38,9 +41,23 @@ half-hour averages are retained as the initial demand model.
 1. The Octopus Energy integration updates its current-day or next-day rate event entity.
 2. The AFERIY plan sensor notices the Home Assistant state update.
 3. Rate periods are parsed and validated as timezone-aware 30-minute records.
-4. Cheapest periods before 16:00 are selected to reach the target SOC.
-5. Highest-value periods between 16:00 and 22:00 are selected for household protection.
-6. Home Assistant updates the Today/Tomorrow Proposed Plan sensors and dashboard card.
+4. When both days exist, tomorrow's refill prices and Today's projected ending
+   SOC join the two daily views into one rolling horizon.
+5. Cheapest periods before 16:00 are selected to reach the target SOC.
+6. Highest-value periods between 16:00 and 22:00 are selected for household protection.
+7. Home Assistant updates the Today/Tomorrow Proposed Plan sensors and dashboard card.
+
+## Solar forecast follow-up
+
+The inherited overnight estimator already reads timed Solcast forecasts, but
+the Agile planner does not currently subtract forecast PV from its half-hour
+house-demand profile. A provider-neutral Agile implementation should consume
+the solar forecast selected in Home Assistant's Energy Dashboard (including
+Forecast.Solar or compatible providers), convert its timestamped Wh forecast to
+the same local half-hour buckets, and fail back to the current demand-only plan
+when the forecast is missing or stale. Forecast energy must be capped by
+expected demand unless an export-price model is added; otherwise surplus PV
+would incorrectly increase the value of battery discharge.
 
 If there is exactly one Octopus import meter, rate entities are discovered
 automatically. Multi-meter installations must select the two import event

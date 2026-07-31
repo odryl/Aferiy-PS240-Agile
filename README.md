@@ -158,10 +158,26 @@ Before Octopus publishes tomorrow's prices, **Tomorrow** correctly stays at
 plan. Once both rate events contain a published rate list, their MPAN, meter
 serial, and Agile tariff are compared before either plan uses the data.
 
+After tomorrow's rates are published (normally during the afternoon), the two
+sensors form a rolling horizon. **Today** values evening discharge against the
+cheapest sufficient set of real pre-16:00 refill periods tomorrow, rather than
+an elapsed or assumed price. **Tomorrow** starts from Today's projected SOC at
+the end of the protection window. The attributes `next_day_rates_used`,
+`replacement_rate_source`, `projected_soc_at_protection_end`, and
+`starting_soc_source` show when this coupling is active. If tomorrow's data is
+missing or unusable, Today safely retains its existing same-day calculation.
+
 The plan aims for 100% SOC by 16:00, protects expected household demand until
 22:00, and only proposes discharge when the avoided import price exceeds the
 estimated delivered replacement cost by at least £0.03/kWh. The Agile ceiling
 is always **800 W for the whole battery system**, never per battery module.
+
+Solar forecasts are not yet deducted from the Agile half-hour demand profile.
+The advanced fixed-window overnight estimates already support timed Solcast
+data. For a future provider-neutral Agile implementation, Home Assistant's
+Energy Dashboard solar-forecast interface is the preferred input; the built-in
+Forecast.Solar integration is one supported provider. Until that input is wired
+into the Agile planner, PV forecast must not be assumed in its savings figures.
 
 ## Create an Agile Dashboard
 
@@ -275,13 +291,17 @@ command.
 For a useful plan-versus-outcome history, create this 30-minute automation:
 
 ```yaml
+alias: Export Agile trial data every 30 minutes
+description: Capture each plan and its live outcome shortly after the tariff boundary.
 trigger:
   - platform: time_pattern
     minutes: "/30"
+    seconds: "10"
 action:
   - service: aecc_battery.export_agile_plan
     data:
       label: half_hour_trial_sample
+mode: single
 ```
 
 After the trial, download the file using the File Editor, Samba share, or your
