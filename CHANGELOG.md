@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.13
 
 - Persist expanded Agile price tables across equivalent Lovelace configuration
   calls, meaningful plan refreshes, and card-element recreation within the same
