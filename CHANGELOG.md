@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.8.12
 
 - Exclude the 23:30-midnight period from pre-16:00 charging and next-day
   replacement pricing; its `00:00` end clock previously crossed a date boundary
