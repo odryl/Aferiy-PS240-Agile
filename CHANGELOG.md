@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.8.14
+
+- Treat live SOC below the configured reserve as a recoverable planning state:
+  plan sufficient recharge, expose the reserve deficit, and prohibit discharge
+  unless the projected SOC first clears the reserve.
+- Recalibrate the advisory 16:00-22:00 demand profile to robust medians from
+  the first 11-12 days of half-hour shadow exports, reducing optimistic
+  discharge and savings estimates.
+- Add planner/profile revision metadata and cumulative PV, charge, and
+  discharge energy counters to schema-v2 shadow exports for cleaner outcome
+  comparisons across upgrades.
+- Record operating mode, last local command, commanded direction, and overnight
+  scheduler state so Self-Gen/Zero Export operation and manual charging can be
+  separated from Agile shadow recommendations.
+
 ## 1.8.13
 
 - Persist expanded Agile price tables across equivalent Lovelace configuration

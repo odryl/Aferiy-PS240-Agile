@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 _SAFE_SYSTEM_POWER_CEILING_W = 800
 _DEFAULT_MINIMUM_SAVING_GBP_PER_KWH = 0.03
 _REQUIRED_SOURCE_ATTRIBUTES = ("mpan", "serial_number", "tariff_code")
+_PLANNER_REVISION = 2
 
 
 def validate_octopus_rate_source(
@@ -181,6 +182,7 @@ def build_agile_day_plan(
     expected_date: date | None = None,
     now: datetime | None = None,
     demand_profile_kwh: dict[str, float] | None = None,
+    demand_profile_revision: str | None = None,
     next_day_rates: Any | None = None,
     target_soc: float = 100.0,
     ready_by: str = "16:00",
@@ -327,8 +329,11 @@ def build_agile_day_plan(
         return _invalid_plan(f"Non-finite planning inputs: {', '.join(non_finite)}.")
     if capacity <= 0:
         return _invalid_plan("Battery capacity must be greater than zero.")
-    if not 0 <= reserve <= start_soc <= 100 or not reserve <= target <= 100:
-        return _invalid_plan("SOC inputs must satisfy 0 <= reserve <= starting/target <= 100.")
+    if not 0 <= start_soc <= 100 or not 0 <= reserve <= target <= 100:
+        return _invalid_plan(
+            "SOC inputs must satisfy 0 <= starting SOC <= 100 and "
+            "0 <= reserve <= target <= 100."
+        )
     if not 0 < charge_efficiency <= 1 or not 0 < discharge_efficiency <= 1:
         return _invalid_plan("Charge and discharge efficiencies must be greater than 0 and at most 1.")
     if minimum_saving < 0:
@@ -353,6 +358,8 @@ def build_agile_day_plan(
 
     charge_grid_limit_kwh = max_charge_power_w / 1000 * 0.5
     discharge_limit_kwh = max_discharge_power_w / 1000 * 0.5
+    starting_below_reserve = start_soc < reserve
+    reserve_recovery_stored_kwh = capacity * max(0.0, reserve - start_soc) / 100
     stored_energy_needed = capacity * max(0.0, target - start_soc) / 100
 
     charge_energy_by_start: dict[datetime, float] = {}
@@ -540,6 +547,7 @@ def build_agile_day_plan(
     return {
         "status": status,
         "reason": reason,
+        "planner_revision": _PLANNER_REVISION,
         "date": day.isoformat(),
         "timezone": timezone,
         "rate_unit": "GBP/kWh",
@@ -567,6 +575,8 @@ def build_agile_day_plan(
         "projected_soc_at_ready_by": round(projected_ready_soc, 1),
         "projected_soc_at_protection_end": round(projected_protection_end_soc, 1),
         "reserve_soc": round(reserve, 1),
+        "starting_below_reserve": starting_below_reserve,
+        "reserve_recovery_stored_kwh": round(reserve_recovery_stored_kwh, 3),
         "battery_capacity_kwh": round(capacity, 3),
         "max_system_charge_power_w": max_charge_power_w,
         "max_system_discharge_power_w": max_discharge_power_w,
@@ -576,9 +586,20 @@ def build_agile_day_plan(
             "will still require grid import during a planned discharge period."
         ),
         "demand_profile_source": (
-            "configured_historical_half_hour_average"
+            "configured_historical_half_hour_profile"
             if profile_provided
             else "no_profile_max_load_assumption"
+        ),
+        "demand_profile_revision": (
+            demand_profile_revision
+            if profile_provided and demand_profile_revision
+            else "caller_supplied" if profile_provided else None
+        ),
+        "demand_profile_total_kwh": round(sum(float(value) for value in demand_profile.values()), 3),
+        "demand_profile_safety_note": (
+            "Historical demand estimates advisory energy and value. Self-Gen/Zero Export "
+            "can use its CT feedback to match actual household demand; any future executor "
+            "must preserve that live zero-export constraint."
         ),
         "charge_periods": len(charge_energy_by_start),
         "discharge_periods": len(discharge_energy_by_start),

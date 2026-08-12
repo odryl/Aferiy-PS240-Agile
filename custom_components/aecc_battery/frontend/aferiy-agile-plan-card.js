@@ -170,6 +170,7 @@ class AferiyAgilePlanCard extends HTMLElement {
     const slots = attrs.slots || [];
     const statusClass = String(attrs.status || state.state).toLowerCase().replaceAll("_", "-");
     const conservativeTomorrow = attrs.starting_soc_source === "conservative_reserve_assumption";
+    const recoveringReserve = attrs.starting_below_reserve === true;
     const rollingToday = attrs.next_day_rates_used === true;
     const rollingTomorrow = attrs.starting_soc_source === "today_projected_protection_end_soc";
     const cheapestRate = Number(attrs.lowest_future_rate_gbp_per_kwh);
@@ -181,6 +182,7 @@ class AferiyAgilePlanCard extends HTMLElement {
         <span class="status ${this._escape(statusClass)}">${this._escape(state.state)}</span>
       </div>
       <p class="reason">${this._escape(attrs.reason || "")}</p>
+      ${recoveringReserve ? `<p class="notice">Battery SOC starts below reserve. The plan prioritises charging back to reserve and will not schedule discharge until that reserve has been recovered.</p>` : ""}
       ${conservativeTomorrow ? `<p class="notice">Tomorrow assumes the battery starts at its reserve SOC; the plan will refine when it becomes Today.</p>` : ""}
       ${rollingToday ? `<p class="notice rolling">Rolling horizon active: tonight's discharge is valued against published refill prices tomorrow.</p>` : ""}
       ${rollingTomorrow ? `<p class="notice rolling">Rolling horizon active: Tomorrow starts from Today's projected ${this._number(attrs.starting_soc, "%", 0)} SOC.</p>` : ""}

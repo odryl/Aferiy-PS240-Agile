@@ -24,6 +24,8 @@ The planner enforces these invariants:
   MPAN, meter serial, and an Agile tariff code matching its counterpart entity
 - non-finite battery, efficiency, price, or demand inputs invalidate the plan
 - missing periods in a supplied demand profile contribute zero planned demand
+- live SOC below reserve is recoverable: recharge includes the reserve deficit,
+  while projected discharge remains zero until reserve is restored
 
 Before next-day rates are published, Tomorrow's plan assumes the battery begins
 at its reserve SOC. Once both valid days are available, Today values discharge
@@ -32,9 +34,15 @@ maximum feasible discharged energy. Tomorrow then begins at Today's projected
 SOC at the protection end. Today's plan uses live System Average Battery SOC
 when available. Both plans use the configured battery capacity.
 
-BottlecapDave rate values are treated as GBP/kWh. The supplied raw consumption
-records are not stored in the repository; only twelve anonymized 16:00-22:00
-half-hour averages are retained as the initial demand model.
+BottlecapDave rate values are treated as GBP/kWh. Raw consumption records are
+not stored in the repository. The twelve retained 16:00-22:00 values are
+anonymized medians recalibrated from schema-v1 shadow exports. They remain an
+advisory demand and value model. When Self-Gen/Zero Export is active, its CT
+feedback is the live demand-following and zero-export control; any future Agile
+executor must preserve that loop rather than replace it with a fixed discharge
+command. Manual pre-peak charging is an external action, not proof that the
+shadow plan executed. Schema-v2 exports therefore include operating mode and
+local-command context so those samples can be classified separately.
 
 ## Data flow
 

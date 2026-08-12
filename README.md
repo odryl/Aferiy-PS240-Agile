@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.13-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.14-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe, view-only Octopus Agile battery planner.
@@ -189,7 +189,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.13`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.14`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 
@@ -300,9 +300,19 @@ trigger:
 action:
   - service: aecc_battery.export_agile_plan
     data:
-      label: half_hour_trial_sample
+      label: post_calibration_v2
 mode: single
 ```
+
+Schema-v2 records include `planner_revisions` and
+`demand_profile_revisions`, plus cumulative PV generation, battery charge, and
+battery discharge energy. They also record the active operating mode, last
+local command, commanded direction, and overnight scheduler state. This allows
+Self-Gen/Zero Export discharge and manual charging to be separated from the
+read-only Agile recommendation. If continuing an existing export file after an
+upgrade, keep the automation running and change its label as above; the revision
+fields separate the new trial phase without requiring the older records to be
+deleted.
 
 After the trial, download the file using the File Editor, Samba share, or your
 usual Home Assistant backup method. The **AECC Agile Plan Export** sensor shows

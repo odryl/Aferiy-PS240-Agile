@@ -34,6 +34,7 @@ def test_sensor_passes_expected_day_time_and_demand_profile_to_planner() -> None
     assert "expected_date=expected_date" in SENSOR_SOURCE
     assert "now=now_utc" in SENSOR_SOURCE
     assert "demand_profile_kwh=AGILE_DEFAULT_DEMAND_PROFILE_KWH" in SENSOR_SOURCE
+    assert "demand_profile_revision=AGILE_DEMAND_PROFILE_REVISION" in SENSOR_SOURCE
 
 
 def test_sensor_replans_both_days_as_one_rolling_horizon_when_rates_exist() -> None:
@@ -78,6 +79,17 @@ def test_agile_plan_export_is_read_only_and_redacts_rate_source_metadata() -> No
     assert '"house_demand_power_w"' in INIT_SOURCE
     assert '"grid_power_w"' in INIT_SOURCE
     assert '"soc_percent"' in INIT_SOURCE
+    assert '"schema_version": 2' in INIT_SOURCE
+    assert '"planner_revisions": planner_revisions' in INIT_SOURCE
+    assert '"demand_profile_revisions": demand_profile_revisions' in INIT_SOURCE
+    assert '"energy_charged_kwh"' in INIT_SOURCE
+    assert '"energy_discharged_kwh"' in INIT_SOURCE
+    assert '"pv_energy_generated_kwh"' in INIT_SOURCE
+    assert '"control_context"' in INIT_SOURCE
+    assert '"operating_mode"' in INIT_SOURCE
+    assert '"last_local_command"' in INIT_SOURCE
+    assert '"commanded_direction"' in INIT_SOURCE
+    assert '"automatic_overnight_charging"' in INIT_SOURCE
     assert '"control_enabled": False' in INIT_SOURCE
     export_service = INIT_SOURCE.split("async def async_export_agile_plan", 1)[1].split(
         "async def async_restore_original_self_consumption", 1
@@ -105,6 +117,7 @@ def test_card_discovers_entities_and_exposes_energy_costs_and_savings() -> None:
     assert "rate.current" in CARD_SOURCE
     assert "All half-hour Agile prices" in CARD_SOURCE
     assert "Rolling horizon active" in CARD_SOURCE
+    assert "Battery SOC starts below reserve" in CARD_SOURCE
     assert "projected_soc_at_protection_end" in CARD_SOURCE
     assert "replacement_rate_source" in CARD_SOURCE
     assert '"_agile_proposed_plan_current"' not in CARD_SOURCE

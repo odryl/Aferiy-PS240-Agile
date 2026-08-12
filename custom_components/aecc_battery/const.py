@@ -46,23 +46,25 @@ DEFAULT_AGILE_PROTECTED_UNTIL = "22:00"
 # is deliberately independent of experimental per-register controls elsewhere.
 AGILE_MAX_SYSTEM_DISCHARGE_POWER_W = 800
 AGILE_MAX_SYSTEM_CHARGE_POWER_W = 800
+AGILE_DEMAND_PROFILE_REVISION = "shadow_2026_08_median_v2"
 
-# Anonymized half-hour averages calculated from the installation's supplied
-# consumption history (55 complete summer days). Values are household kWh per
-# period and cap planned discharge to energy the home is likely to consume.
+# Anonymized half-hour medians calculated from the installation's first
+# 11-12 complete days of 30-minute shadow exports. Medians deliberately reduce
+# the influence of occasional load spikes. Values are household kWh per period
+# and cap advisory discharge to energy the home is reasonably likely to use.
 AGILE_DEFAULT_DEMAND_PROFILE_KWH: dict[str, float] = {
-    "16:00": 0.310,
-    "16:30": 0.299,
-    "17:00": 0.329,
-    "17:30": 0.362,
-    "18:00": 0.505,
-    "18:30": 0.590,
-    "19:00": 0.675,
-    "19:30": 0.504,
-    "20:00": 0.408,
-    "20:30": 0.500,
-    "21:00": 0.547,
-    "21:30": 0.527,
+    "16:00": 0.219,
+    "16:30": 0.213,
+    "17:00": 0.211,
+    "17:30": 0.203,
+    "18:00": 0.355,
+    "18:30": 0.375,
+    "19:00": 0.281,
+    "19:30": 0.214,
+    "20:00": 0.232,
+    "20:30": 0.236,
+    "21:00": 0.162,
+    "21:30": 0.406,
 }
 OVERNIGHT_CHARGE_MODE_LABELS: dict[str, str] = {
     OVERNIGHT_CHARGE_MODE_SMART: "On",

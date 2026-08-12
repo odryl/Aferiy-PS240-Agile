@@ -166,6 +166,44 @@ def test_limited_charge_cannot_create_impossible_discharge_energy() -> None:
     assert plan["planned_discharge_kwh"] <= achievable_delivered_kwh + 1e-9
 
 
+def test_starting_below_reserve_is_recoverable_and_not_invalid() -> None:
+    plan = _plan(
+        battery_capacity_kwh=1.958,
+        starting_soc=11,
+        reserve_soc=15,
+        demand_profile_kwh={"19:00": 0.2},
+        demand_profile_revision="shadow_2026_08_median_v2",
+    )
+
+    assert plan["status"] == "proposed"
+    assert plan["starting_below_reserve"] is True
+    assert plan["reserve_recovery_stored_kwh"] == 0.078
+    assert plan["planned_grid_charge_kwh"] > 0
+    assert plan["planner_revision"] == 2
+    assert plan["demand_profile_revision"] == "shadow_2026_08_median_v2"
+
+
+def test_unrecoverable_below_reserve_plan_never_creates_discharge_energy() -> None:
+    now = datetime(2026, 7, 27, 15, 30, tzinfo=ZoneInfo("Europe/London"))
+    plan = _plan(
+        now=now,
+        starting_soc=0,
+        reserve_soc=15,
+        demand_profile_kwh={"19:00": 0.4},
+    )
+
+    assert plan["status"] == "limited"
+    assert plan["projected_soc_at_ready_by"] < plan["reserve_soc"]
+    assert plan["planned_discharge_kwh"] == 0
+
+
+def test_out_of_range_starting_soc_still_fails_safe() -> None:
+    for starting_soc in (-0.1, 100.1):
+        plan = _plan(starting_soc=starting_soc, reserve_soc=15)
+        assert plan["status"] == "invalid"
+        assert plan["slots"] == []
+
+
 def test_rates_are_gbp_and_savings_are_not_divided_by_100() -> None:
     plan = _plan()
 

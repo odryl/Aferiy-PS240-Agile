@@ -35,6 +35,7 @@ from homeassistant.util.dt import utcnow
 from .agile import build_agile_day_plan, validate_octopus_rate_source
 from .const import (
     AGILE_DEFAULT_DEMAND_PROFILE_KWH,
+    AGILE_DEMAND_PROFILE_REVISION,
     AGILE_MAX_SYSTEM_CHARGE_POWER_W,
     AGILE_MAX_SYSTEM_DISCHARGE_POWER_W,
     CONF_AGILE_CURRENT_DAY_RATES_ENTITY,
@@ -897,6 +898,7 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
                 expected_date=local_now.date(),
                 now=now_utc,
                 demand_profile_kwh=AGILE_DEFAULT_DEMAND_PROFILE_KWH,
+                demand_profile_revision=AGILE_DEMAND_PROFILE_REVISION,
                 next_day_rates=raw_rates,
                 ready_by=ready_by,
                 protected_until=protected_until,
@@ -941,6 +943,7 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
             expected_date=expected_date,
             now=now_utc,
             demand_profile_kwh=AGILE_DEFAULT_DEMAND_PROFILE_KWH,
+            demand_profile_revision=AGILE_DEMAND_PROFILE_REVISION,
             next_day_rates=counterpart_rates if self._day_kind == "current" else None,
             ready_by=ready_by,
             protected_until=protected_until,

@@ -717,11 +717,27 @@ def _async_register_services(hass: HomeAssistant) -> None:
             _LOGGER.warning("AECC Agile plan export found no Proposed Plan sensor states")
             return
 
+        planner_revisions = sorted(
+            {
+                plan["attributes"].get("planner_revision")
+                for plan in plans.values()
+                if plan["attributes"].get("planner_revision") is not None
+            }
+        )
+        demand_profile_revisions = sorted(
+            {
+                plan["attributes"].get("demand_profile_revision")
+                for plan in plans.values()
+                if plan["attributes"].get("demand_profile_revision") is not None
+            }
+        )
         record = {
-            "schema_version": 1,
+            "schema_version": 2,
             "exported_at": exported_at,
             "label": label,
             "control_enabled": False,
+            "planner_revisions": planner_revisions,
+            "demand_profile_revisions": demand_profile_revisions,
             "plans": plans,
             "telemetry": telemetry,
         }
@@ -915,6 +931,14 @@ def _agile_trial_telemetry(
     coordinator: AeccBatteryCoordinator,
 ) -> dict[str, Any]:
     """Return the non-identifying live measurements needed for plan review."""
+    def entity_state(platform: Platform, unique_suffix: str) -> Any | None:
+        entity_id = registry.async_get_entity_id(
+            platform,
+            DOMAIN,
+            f"{entry_id}_{unique_suffix}",
+        )
+        return hass.states.get(entity_id) if entity_id else None
+
     def coordinator_value(key: str) -> float | None:
         try:
             value = float(coordinator.get_value(key))
@@ -923,12 +947,7 @@ def _agile_trial_telemetry(
         return round(value, 3) if isfinite(value) else None
 
     def entity_value(unique_suffix: str) -> float | None:
-        entity_id = registry.async_get_entity_id(
-            Platform.SENSOR,
-            DOMAIN,
-            f"{entry_id}_{unique_suffix}",
-        )
-        state = hass.states.get(entity_id) if entity_id else None
+        state = entity_state(Platform.SENSOR, unique_suffix)
         if state is None:
             return None
         try:
@@ -937,7 +956,30 @@ def _agile_trial_telemetry(
             return None
         return round(value, 3) if isfinite(value) else None
 
+    operating_mode = entity_state(Platform.SELECT, "operating_mode")
+    overnight_mode = entity_state(Platform.SELECT, "automatic_overnight_charging")
+    overnight_status = entity_state(
+        Platform.SENSOR,
+        "automatic_overnight_charging_status",
+    )
+
     return {
+        "control_context": {
+            "operating_mode": operating_mode.state if operating_mode else None,
+            "operating_mode_source": (
+                operating_mode.attributes.get("source") if operating_mode else None
+            ),
+            "last_local_command": (
+                operating_mode.attributes.get("last_local_command") if operating_mode else None
+            ),
+            "last_local_command_at": (
+                operating_mode.attributes.get("last_local_command_at") if operating_mode else None
+            ),
+            "commanded_work_mode": coordinator.commanded_work_mode,
+            "commanded_direction": coordinator.commanded_direction,
+            "automatic_overnight_charging": overnight_mode.state if overnight_mode else None,
+            "automatic_overnight_status": overnight_status.state if overnight_status else None,
+        },
         "battery": {
             "soc_percent": coordinator_value("average_battery_soc"),
             "configured_capacity_kwh": round(float(coordinator.battery_capacity_kwh), 3),
@@ -945,10 +987,13 @@ def _agile_trial_telemetry(
             "total_charge_power_w": coordinator_value("total_charge_power"),
             "discharge_power_w": coordinator_value("battery_discharging_power"),
             "total_battery_output_power_w": coordinator_value("total_battery_output_power"),
+            "energy_charged_kwh": entity_value("energy_charged"),
+            "energy_discharged_kwh": entity_value("energy_discharged"),
         },
         "site": {
             "grid_power_w": coordinator_value("grid_power"),
             "pv_power_w": coordinator_value("pv_power"),
+            "pv_energy_generated_kwh": entity_value("energy_generated"),
             "house_demand_power_w": entity_value("estimated_house_demand"),
             "house_demand_energy_kwh": entity_value("house_demand_energy"),
             "house_demand_daily_kwh": entity_value("house_demand_daily"),
