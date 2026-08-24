@@ -79,7 +79,7 @@ def test_agile_plan_export_is_read_only_and_redacts_rate_source_metadata() -> No
     assert '"house_demand_power_w"' in INIT_SOURCE
     assert '"grid_power_w"' in INIT_SOURCE
     assert '"soc_percent"' in INIT_SOURCE
-    assert '"schema_version": 2' in INIT_SOURCE
+    assert '"schema_version": 3' in INIT_SOURCE
     assert '"planner_revisions": planner_revisions' in INIT_SOURCE
     assert '"demand_profile_revisions": demand_profile_revisions' in INIT_SOURCE
     assert '"energy_charged_kwh"' in INIT_SOURCE
@@ -90,6 +90,10 @@ def test_agile_plan_export_is_read_only_and_redacts_rate_source_metadata() -> No
     assert '"last_local_command"' in INIT_SOURCE
     assert '"commanded_direction"' in INIT_SOURCE
     assert '"automatic_overnight_charging"' in INIT_SOURCE
+    assert '"connection_last_update_success"' in INIT_SOURCE
+    assert '"connection_age_seconds"' in INIT_SOURCE
+    assert '"agile_shadow_decision"' in INIT_SOURCE
+    assert "append_agile_json_line" in INIT_SOURCE
     assert '"control_enabled": False' in INIT_SOURCE
     export_service = INIT_SOURCE.split("async def async_export_agile_plan", 1)[1].split(
         "async def async_restore_original_self_consumption", 1
@@ -101,6 +105,8 @@ def test_agile_plan_export_is_read_only_and_redacts_rate_source_metadata() -> No
 def test_card_discovers_entities_and_exposes_energy_costs_and_savings() -> None:
     assert '"_agile_proposed_plan_today"' in CARD_SOURCE
     assert '"_agile_proposed_plan_tomorrow"' in CARD_SOURCE
+    assert '"_agile_shadow_operating_state"' in CARD_SOURCE
+    assert "Shadow operating state" in CARD_SOURCE
     assert "slot.rate_gbp_per_kwh" in CARD_SOURCE
     assert "slot.energy_kwh" in CARD_SOURCE
     assert "slot.duration_minutes" in CARD_SOURCE
@@ -122,6 +128,24 @@ def test_card_discovers_entities_and_exposes_energy_costs_and_savings() -> None:
     assert "replacement_rate_source" in CARD_SOURCE
     assert '"_agile_proposed_plan_current"' not in CARD_SOURCE
     assert '"_agile_proposed_plan_next"' not in CARD_SOURCE
+
+
+def test_shadow_state_machine_is_registered_and_remains_view_only() -> None:
+    assert "AeccAgileShadowOperatingStateSensor" in SENSOR_SOURCE
+    assert "_agile_shadow_operating_state" in SENSOR_SOURCE
+    assert "build_agile_shadow_decision(" in SENSOR_SOURCE
+    shadow_sensor = SENSOR_SOURCE.split("class AeccAgileShadowOperatingStateSensor", 1)[1].split(
+        "class AeccSensor",
+        1,
+    )[0]
+    assert "async_write_register" not in shadow_sensor
+    assert "async_set_battery_control" not in shadow_sensor
+
+
+def test_midnight_rate_entity_rollover_is_a_waiting_state() -> None:
+    assert 'plan.get("status") == "invalid"' in SENSOR_SOURCE
+    assert '"rollover_grace_active": True' in SENSOR_SOURCE
+    assert "Octopus is rolling the current-day and next-day rate entities" in SENSOR_SOURCE
 
 
 def test_card_avoids_unrelated_renders_and_preserves_open_rate_tables() -> None:

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.8.15
+
+- Add a view-only Agile Shadow Operating State sensor that locks upcoming
+  half-hour actions before their boundary and recommends Solar Self-Gen,
+  Planned Charge, Post-solar Hold, Peak Self-Gen, reserve protection, or a
+  fail-safe state without sending battery commands.
+- Replace the total-demand profile with schema-v2 net-demand medians that
+  subtract measured PV, while exposing configured Energy Dashboard solar
+  forecast providers for the next forecast-ingestion stage.
+- Treat the brief midnight Octopus entity rollover as Waiting rather than
+  Invalid, and clarify that 800 W is an Agile command limit rather than a
+  device-wide Self-Gen ceiling.
+- Add connection freshness and shadow decisions to schema-v3 exports. Rotate
+  the active JSONL at 8 MiB into timestamped gzip archives so long-running
+  logging remains manageable without deleting trial history.
+
 ## 1.8.14
 
 - Treat live SOC below the configured reserve as a recoverable planning state:

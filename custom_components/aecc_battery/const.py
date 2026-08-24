@@ -46,25 +46,25 @@ DEFAULT_AGILE_PROTECTED_UNTIL = "22:00"
 # is deliberately independent of experimental per-register controls elsewhere.
 AGILE_MAX_SYSTEM_DISCHARGE_POWER_W = 800
 AGILE_MAX_SYSTEM_CHARGE_POWER_W = 800
-AGILE_DEMAND_PROFILE_REVISION = "shadow_2026_08_median_v2"
+AGILE_DEMAND_PROFILE_REVISION = "shadow_2026_08_net_median_v3"
 
-# Anonymized half-hour medians calculated from the installation's first
-# 11-12 complete days of 30-minute shadow exports. Medians deliberately reduce
-# the influence of occasional load spikes. Values are household kWh per period
-# and cap advisory discharge to energy the home is reasonably likely to use.
+# Anonymized half-hour net-demand medians from 12 complete schema-v2 shadow
+# days.  Each value is household demand after measured PV, so the advisory
+# plan no longer assumes that daytime solar can also be displaced by battery
+# discharge.  Live CT feedback remains the zero-export safety control.
 AGILE_DEFAULT_DEMAND_PROFILE_KWH: dict[str, float] = {
-    "16:00": 0.219,
-    "16:30": 0.213,
-    "17:00": 0.211,
-    "17:30": 0.203,
-    "18:00": 0.355,
-    "18:30": 0.375,
-    "19:00": 0.281,
-    "19:30": 0.214,
-    "20:00": 0.232,
-    "20:30": 0.236,
-    "21:00": 0.162,
-    "21:30": 0.406,
+    "16:00": 0.123,
+    "16:30": 0.136,
+    "17:00": 0.132,
+    "17:30": 0.162,
+    "18:00": 0.165,
+    "18:30": 0.181,
+    "19:00": 0.253,
+    "19:30": 0.210,
+    "20:00": 0.202,
+    "20:30": 0.195,
+    "21:00": 0.189,
+    "21:30": 0.345,
 }
 OVERNIGHT_CHARGE_MODE_LABELS: dict[str, str] = {
     OVERNIGHT_CHARGE_MODE_SMART: "On",

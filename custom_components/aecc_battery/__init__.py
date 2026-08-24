@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import UTC, datetime
 from math import isfinite
@@ -17,6 +16,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import slugify
 
+from .agile_export import append_agile_json_line
 from .const import (
     BRAND_PROFILES,
     CONF_ADVANCED_ENERGY_SENSORS,
@@ -732,7 +732,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             }
         )
         record = {
-            "schema_version": 2,
+            "schema_version": 3,
             "exported_at": exported_at,
             "label": label,
             "control_enabled": False,
@@ -743,7 +743,11 @@ def _async_register_services(hass: HomeAssistant) -> None:
         }
         export_path = hass.config.path(AGILE_PLAN_EXPORT_FILENAME)
         try:
-            await hass.async_add_executor_job(_append_json_line, export_path, record)
+            export_result = await hass.async_add_executor_job(
+                append_agile_json_line,
+                export_path,
+                record,
+            )
         except OSError as exc:
             _LOGGER.error("Could not export AECC Agile plan data to %s: %s", export_path, exc)
             return
@@ -759,8 +763,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 "plan_count": len(plans),
                 "telemetry_count": len(telemetry),
                 "file": AGILE_PLAN_EXPORT_FILENAME,
+                **export_result,
                 "control_enabled": False,
-                "note": "Read-only trial export; no battery command was sent.",
+                "note": (
+                    "Read-only trial export; no battery command was sent. The active file "
+                    "is compressed and rotated when it reaches 8 MiB."
+                ),
             },
         )
         _LOGGER.info("Exported %d read-only AECC Agile plan snapshots to %s", len(plans), export_path)
@@ -917,13 +925,6 @@ def _diff_registers(
     return changes
 
 
-def _append_json_line(path: str, record: dict[str, Any]) -> None:
-    """Append one JSON record off the Home Assistant event loop."""
-    with open(path, "a", encoding="utf-8") as export_file:
-        export_file.write(json.dumps(record, default=str, separators=(",", ":")))
-        export_file.write("\n")
-
-
 def _agile_trial_telemetry(
     hass: HomeAssistant,
     registry: er.EntityRegistry,
@@ -962,6 +963,14 @@ def _agile_trial_telemetry(
         Platform.SENSOR,
         "automatic_overnight_charging_status",
     )
+    shadow_decision = entity_state(Platform.SENSOR, "agile_shadow_operating_state")
+    now_utc = datetime.now(UTC)
+    last_successful_update = coordinator.last_successful_update
+    connection_age_seconds = (
+        max(0.0, (now_utc - last_successful_update).total_seconds())
+        if last_successful_update is not None
+        else None
+    )
 
     return {
         "control_context": {
@@ -979,6 +988,29 @@ def _agile_trial_telemetry(
             "commanded_direction": coordinator.commanded_direction,
             "automatic_overnight_charging": overnight_mode.state if overnight_mode else None,
             "automatic_overnight_status": overnight_status.state if overnight_status else None,
+            "connection_last_update_success": coordinator.last_update_success,
+            "connection_last_successful_update": (
+                last_successful_update.isoformat() if last_successful_update is not None else None
+            ),
+            "connection_age_seconds": (
+                round(connection_age_seconds, 1)
+                if connection_age_seconds is not None
+                else None
+            ),
+            "connection_consecutive_failures": coordinator._consecutive_failures,
+            "connection_last_failure_reason": coordinator.last_failure_reason,
+            "agile_shadow_decision": (
+                {
+                    "state": shadow_decision.state,
+                    **{
+                        key: value
+                        for key, value in shadow_decision.attributes.items()
+                        if key not in ("friendly_name", "icon")
+                    },
+                }
+                if shadow_decision is not None
+                else None
+            ),
         },
         "battery": {
             "soc_percent": coordinator_value("average_battery_soc"),

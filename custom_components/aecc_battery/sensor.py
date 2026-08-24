@@ -32,7 +32,11 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util.dt import utcnow
 
-from .agile import build_agile_day_plan, validate_octopus_rate_source
+from .agile import (
+    build_agile_day_plan,
+    build_agile_shadow_decision,
+    validate_octopus_rate_source,
+)
 from .const import (
     AGILE_DEFAULT_DEMAND_PROFILE_KWH,
     AGILE_DEMAND_PROFILE_REVISION,
@@ -640,6 +644,7 @@ async def async_setup_entry(
     entities.append(AeccSmartHistorySensor(coordinator, config_entry))
     entities.append(AeccAgileProposedPlanSensor(coordinator, config_entry, "current"))
     entities.append(AeccAgileProposedPlanSensor(coordinator, config_entry, "next"))
+    entities.append(AeccAgileShadowOperatingStateSensor(coordinator, config_entry))
 
     entities.append(AeccEstimatedHouseDemandSensor(coordinator, config_entry))
     entities.append(AeccHouseDemandEnergySensor(coordinator, config_entry))
@@ -950,6 +955,25 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
             max_charge_power_w=AGILE_MAX_SYSTEM_CHARGE_POWER_W,
             max_discharge_power_w=AGILE_MAX_SYSTEM_DISCHARGE_POWER_W,
         )
+        if (
+            plan.get("status") == "invalid"
+            and local_now.hour == 0
+            and local_now.minute < 30
+            and str(plan.get("reason") or "").startswith("Rate payload is for ")
+        ):
+            plan = {
+                **self._waiting_plan(
+                    "Octopus is rolling the current-day and next-day rate entities "
+                    "across midnight; waiting for the matching local dates."
+                ),
+                "date": expected_date.isoformat(),
+                "rollover_grace_active": True,
+                "rollover_grace_until": local_now.replace(
+                    minute=30,
+                    second=0,
+                    microsecond=0,
+                ).isoformat(),
+            }
         plan["starting_soc_source"] = starting_soc_source
         plan["tariff_code"] = state.attributes.get("tariff_code")
         plan["mpan"] = state.attributes.get("mpan")
@@ -957,6 +981,225 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
         self._cached_plan_key = cache_key
         self._cached_plan = plan
         return plan
+
+
+class AeccAgileShadowOperatingStateSensor(
+    AeccRecorderLeanMixin,
+    CoordinatorEntity[AeccBatteryCoordinator],
+    SensorEntity,
+):
+    """Shadow-only state machine for a future supervised Agile controller."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Agile Shadow Operating State"
+    _attr_icon = "mdi:state-machine"
+
+    def __init__(
+        self,
+        coordinator: AeccBatteryCoordinator,
+        config_entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._config_entry = config_entry
+        self._attr_unique_id = f"{config_entry.entry_id}_agile_shadow_operating_state"
+        self._locked_actions: dict[str, dict[str, Any]] = {}
+        self._pv_quiet_since: datetime | None = None
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return self.coordinator.device_info
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self.hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_plan_state_changed)
+        )
+
+    def _plan_entity_id(self) -> str | None:
+        return er.async_get(self.hass).async_get_entity_id(
+            "sensor",
+            DOMAIN,
+            f"{self._config_entry.entry_id}_agile_proposed_plan_current",
+        )
+
+    @callback
+    def _async_plan_state_changed(self, event: Event) -> None:
+        if event.data.get("entity_id") == self._plan_entity_id():
+            self.async_write_ha_state()
+
+    def _current_plan(self) -> dict[str, Any] | None:
+        entity_id = self._plan_entity_id()
+        state = self.hass.states.get(entity_id) if entity_id else None
+        if state is None:
+            return None
+        return dict(state.attributes)
+
+    @staticmethod
+    def _slot_key(moment: datetime) -> str:
+        return moment.replace(
+            minute=(moment.minute // 30) * 30,
+            second=0,
+            microsecond=0,
+        ).astimezone(UTC).isoformat()
+
+    def _action_for_now(
+        self,
+        plan: dict[str, Any] | None,
+        now: datetime,
+    ) -> dict[str, Any] | None:
+        for key in list(self._locked_actions):
+            try:
+                if datetime.fromisoformat(key) + timedelta(minutes=30) <= now:
+                    self._locked_actions.pop(key, None)
+            except ValueError:
+                self._locked_actions.pop(key, None)
+
+        slots = plan.get("slots", []) if plan else []
+        for slot in slots:
+            if not isinstance(slot, dict) or slot.get("action") not in ("charge", "discharge"):
+                continue
+            try:
+                start = datetime.fromisoformat(str(slot.get("start")))
+            except ValueError:
+                continue
+            if start.tzinfo is None:
+                continue
+            if now < start <= now + timedelta(minutes=35):
+                self._locked_actions[start.astimezone(UTC).isoformat()] = {
+                    **slot,
+                    "decision_source": "pre_boundary_lock",
+                    "locked_at": now.isoformat(),
+                }
+
+        current_key = self._slot_key(now)
+        if current_key in self._locked_actions:
+            return dict(self._locked_actions[current_key])
+
+        for slot in slots:
+            if not isinstance(slot, dict) or slot.get("action") not in ("charge", "discharge"):
+                continue
+            try:
+                start = datetime.fromisoformat(str(slot.get("start")))
+                end = datetime.fromisoformat(str(slot.get("end")))
+            except ValueError:
+                continue
+            if start.tzinfo is not None and end.tzinfo is not None and start <= now < end:
+                return {**slot, "decision_source": "current_plan"}
+        return None
+
+    def _connection_context(self, now_utc: datetime) -> tuple[bool, float | None, float]:
+        last_success = self.coordinator.last_successful_update
+        age_seconds = (
+            max(0.0, (now_utc - last_success).total_seconds())
+            if last_success is not None
+            else None
+        )
+        update_interval = self.coordinator.update_interval or timedelta(seconds=30)
+        stale_after = min(300.0, max(90.0, update_interval.total_seconds() * 3))
+        fresh = bool(
+            self.coordinator.last_update_success
+            and age_seconds is not None
+            and age_seconds <= stale_after
+        )
+        return fresh, age_seconds, stale_after
+
+    def _solar_forecast_config_entries(self) -> list[str]:
+        manager = getattr(self.coordinator, "energy_dashboard_manager", None)
+        preferences = getattr(manager, "data", None) or {}
+        entries: list[str] = []
+        for source in preferences.get("energy_sources", []):
+            if source.get("type") != "solar":
+                continue
+            configured = source.get("config_entry_solar_forecast") or []
+            if isinstance(configured, str):
+                configured = [configured]
+            if isinstance(configured, list):
+                entries.extend(str(value) for value in configured if value)
+        return sorted(set(entries))
+
+    def _decision(self) -> dict[str, Any]:
+        now_utc = utcnow()
+        now_local = now_utc.astimezone(ZoneInfo(self.hass.config.time_zone))
+        plan = self._current_plan()
+        action = self._action_for_now(plan, now_local)
+        aecc_pv_power_w = _as_float(self.coordinator.get_value("pv_power"), 0.0) or 0.0
+        additional_pv_power_w, live_solar_context = _energy_dashboard_additional_solar_w(
+            self.hass,
+            self.coordinator,
+        )
+        pv_power_w = max(0.0, aecc_pv_power_w) + max(0.0, additional_pv_power_w)
+        total_charge_power_w = (
+            _as_float(self.coordinator.get_value("total_charge_power"), 0.0) or 0.0
+        )
+        ac_charge_power_w = (
+            _as_float(self.coordinator.get_value("ac_charging_power"), 0.0) or 0.0
+        )
+        inferred_pv_charge_w = max(0.0, total_charge_power_w - ac_charge_power_w)
+        solar_active = pv_power_w >= 50 or inferred_pv_charge_w >= 50
+        if solar_active:
+            self._pv_quiet_since = None
+        elif self._pv_quiet_since is None:
+            self._pv_quiet_since = now_utc
+        pv_quiet_minutes = (
+            (now_utc - self._pv_quiet_since).total_seconds() / 60
+            if self._pv_quiet_since is not None
+            else 0.0
+        )
+        fresh, age_seconds, stale_after = self._connection_context(now_utc)
+        soc = _as_float(self.coordinator.get_value("average_battery_soc"))
+        reserve = float(getattr(self.coordinator, "_commanded_min_soc", 10))
+        decision = build_agile_shadow_decision(
+            plan,
+            now=now_local,
+            connection_fresh=fresh,
+            soc_percent=soc,
+            reserve_soc=reserve,
+            pv_power_w=pv_power_w,
+            total_charge_power_w=total_charge_power_w,
+            ac_charge_power_w=ac_charge_power_w,
+            pv_quiet_minutes=pv_quiet_minutes,
+            locked_action=action,
+        )
+        forecast_entries = self._solar_forecast_config_entries()
+        decision.update(
+            {
+                "connection_last_successful_update": (
+                    self.coordinator.last_successful_update.isoformat()
+                    if self.coordinator.last_successful_update is not None
+                    else None
+                ),
+                "connection_age_seconds": round(age_seconds, 1) if age_seconds is not None else None,
+                "connection_stale_after_seconds": round(stale_after, 1),
+                "connection_last_failure_reason": self.coordinator.last_failure_reason,
+                "solar_forecast_config_entries": forecast_entries,
+                "solar_forecast_status": (
+                    "configured_provider_hook" if forecast_entries else "historical_net_profile_fallback"
+                ),
+                "live_solar_context": live_solar_context,
+                "aecc_pv_power_w": round(max(0.0, aecc_pv_power_w), 1),
+                "additional_pv_power_w": round(max(0.0, additional_pv_power_w), 1),
+                "locked_action_count": len(self._locked_actions),
+                "note": (
+                    "Shadow recommendation only. No battery command is sent; any future "
+                    "executor must use bounded commands and restore Self-Gen on failure."
+                ),
+            }
+        )
+        return decision
+
+    @property
+    def native_value(self) -> str:
+        return str(self._decision().get("state", "Connection Fail-safe"))
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        decision = self._decision()
+        decision.pop("state", None)
+        return decision
 
 
 class AeccSensor(CoordinatorEntity[AeccBatteryCoordinator], SensorEntity):

@@ -34,6 +34,7 @@ class AferiyAgilePlanCard extends HTMLElement {
   _renderIfNeeded(force = false) {
     const today = this._find(this.config.today_entity, "_agile_proposed_plan_today", "Agile Proposed Plan Today");
     const tomorrow = this._find(this.config.tomorrow_entity, "_agile_proposed_plan_tomorrow", "Agile Proposed Plan Tomorrow");
+    const shadow = this._find(this.config.shadow_entity, "_agile_shadow_operating_state", "Agile Shadow Operating State");
     const signature = JSON.stringify([
       today?.entity_id,
       today?.state,
@@ -41,10 +42,15 @@ class AferiyAgilePlanCard extends HTMLElement {
       tomorrow?.entity_id,
       tomorrow?.state,
       tomorrow?.attributes,
+      shadow?.entity_id,
+      shadow?.state,
+      shadow?.attributes?.recommended_operating_mode,
+      shadow?.attributes?.reason,
+      shadow?.attributes?.planned_slot_start,
     ]);
     if (!force && signature === this._renderSignature) return;
     this._renderSignature = signature;
-    this.render(today, tomorrow);
+    this.render(today, tomorrow, shadow);
   }
 
   _timelineStorageKey() {
@@ -202,7 +208,7 @@ class AferiyAgilePlanCard extends HTMLElement {
         <span>Discharged-energy replacement ${this._money(attrs.estimated_discharge_replacement_cost_gbp)} at ${this._rate(attrs.delivered_replacement_cost_gbp_per_kwh)}/kWh</span>
         <span>Replacement prices: ${this._escape(attrs.replacement_rate_source === "next_day_published_rates" ? "published tomorrow" : "same day")}</span>
         <span>Reserve ${this._number(attrs.reserve_soc, "%", 0)}</span>
-        <span>System limit ${this._number(attrs.max_system_discharge_power_w, " W", 0)}</span>
+        <span>Agile command limit ${this._number(attrs.max_system_discharge_power_w, " W", 0)}</span>
       </div>
       <h4>Charge and discharge schedule</h4>
       ${this._activeRows(slots)}
@@ -211,7 +217,7 @@ class AferiyAgilePlanCard extends HTMLElement {
     </section>`;
   }
 
-  render(today, tomorrow) {
+  render(today, tomorrow, shadow) {
     if (!this._hass) return;
     this._loadOpenTimelines();
     this.querySelectorAll("details[data-timeline]").forEach((details) => {
@@ -230,6 +236,8 @@ class AferiyAgilePlanCard extends HTMLElement {
         .status.proposed { color: var(--success-color, #2e7d32); } .status.invalid, .status.limited { color: var(--error-color, #c62828); }
         .notice { margin-top: 10px; padding: 9px; border-left: 3px solid var(--warning-color, #f9a825); background: var(--secondary-background-color); font-size: 12px; }
         .notice.rolling { border-left-color: var(--success-color, #43a047); }
+        .shadow-state { margin-top: 12px; padding: 10px; border-left: 3px solid var(--primary-color); background: var(--secondary-background-color); }
+        .shadow-state strong, .shadow-state span { display: block; } .shadow-state span { margin-top: 3px; color: var(--secondary-text-color); font-size: 12px; }
         .metrics { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 8px; margin: 14px 0 9px; }
         .metric { background: var(--secondary-background-color); border-radius: 10px; padding: 10px; border-left: 3px solid var(--divider-color); }
         .metric span { display: block; color: var(--secondary-text-color); font-size: 11px; margin-bottom: 4px; }
@@ -254,6 +262,7 @@ class AferiyAgilePlanCard extends HTMLElement {
       </style>
       <h2>${this._escape(this.config.title || "Octopus Agile Battery Plan")}</h2>
       <p class="subtitle">Today and tomorrow · view-only shadow plan · no automatic battery commands</p>
+      ${shadow ? `<div class="shadow-state"><strong>Shadow operating state: ${this._escape(shadow.state)}</strong><span>Would use ${this._escape(shadow.attributes?.recommended_operating_mode || "Self-Gen/Zero Export")} · ${this._escape(shadow.attributes?.reason || "Waiting for a decision")}</span></div>` : ""}
       ${this._day(today, "Today")}
       ${this._day(tomorrow, "Tomorrow")}
     </ha-card>`;

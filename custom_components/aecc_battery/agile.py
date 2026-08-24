@@ -14,6 +14,7 @@ _SAFE_SYSTEM_POWER_CEILING_W = 800
 _DEFAULT_MINIMUM_SAVING_GBP_PER_KWH = 0.03
 _REQUIRED_SOURCE_ATTRIBUTES = ("mpan", "serial_number", "tariff_code")
 _PLANNER_REVISION = 2
+_SHADOW_DECISION_REVISION = 1
 
 
 def validate_octopus_rate_source(
@@ -582,8 +583,8 @@ def build_agile_day_plan(
         "max_system_discharge_power_w": max_discharge_power_w,
         "max_discharge_per_half_hour_kwh": round(discharge_limit_kwh, 3),
         "power_constraint_note": (
-            "The 800 W ceiling applies to the whole system. Household demand above 800 W "
-            "will still require grid import during a planned discharge period."
+            "800 W is the conservative Agile command limit. Self-Gen/Zero Export may use "
+            "a different device-managed output while its CT follows household demand."
         ),
         "demand_profile_source": (
             "configured_historical_half_hour_profile"
@@ -630,3 +631,132 @@ def build_agile_day_plan(
         "control_enabled": False,
         "slots": slots,
     }
+
+
+def build_agile_shadow_decision(
+    plan: Mapping[str, Any] | None,
+    *,
+    now: datetime,
+    connection_fresh: bool,
+    soc_percent: float | None,
+    reserve_soc: float,
+    pv_power_w: float,
+    total_charge_power_w: float,
+    ac_charge_power_w: float,
+    pv_quiet_minutes: float,
+    locked_action: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Recommend a view-only operating state without sending device commands."""
+    base = {
+        "decision_revision": _SHADOW_DECISION_REVISION,
+        "control_enabled": False,
+        "decision_time": now.isoformat(),
+        "soc_percent": round(soc_percent, 1) if soc_percent is not None else None,
+        "reserve_soc": round(reserve_soc, 1),
+        "pv_power_w": round(max(0.0, pv_power_w), 1),
+        "total_charge_power_w": round(max(0.0, total_charge_power_w), 1),
+        "ac_charge_power_w": round(max(0.0, ac_charge_power_w), 1),
+        "pv_quiet_minutes": round(max(0.0, pv_quiet_minutes), 1),
+        "failsafe_mode": "Self-Gen/Zero Export",
+    }
+
+    def result(state: str, mode: str, reason: str, **extra: Any) -> dict[str, Any]:
+        return {
+            **base,
+            "state": state,
+            "recommended_operating_mode": mode,
+            "reason": reason,
+            **extra,
+        }
+
+    if not connection_fresh:
+        return result(
+            "Connection Fail-safe",
+            "Self-Gen/Zero Export",
+            "Telemetry is unavailable or stale; do not start a timed command.",
+        )
+    if soc_percent is None or not isfinite(soc_percent):
+        return result(
+            "Connection Fail-safe",
+            "Self-Gen/Zero Export",
+            "A trustworthy battery SOC is unavailable.",
+        )
+    if not plan or plan.get("status") not in ("proposed", "limited"):
+        return result(
+            "Rate Fail-safe",
+            "Self-Gen/Zero Export",
+            "A validated current-day Agile plan is unavailable.",
+        )
+
+    action = dict(locked_action or {})
+    action_name = str(action.get("action") or "hold")
+    action_source = str(
+        action.pop("decision_source", None)
+        or ("pre_boundary_lock" if locked_action else "current_plan")
+    )
+    action_attrs = {
+        "planned_action": action_name,
+        "planned_action_source": action_source,
+        "planned_slot_start": action.get("start"),
+        "planned_slot_end": action.get("end"),
+        "planned_slot_energy_kwh": action.get("energy_kwh"),
+        "planned_slot_power_limit_w": action.get("command_power_limit_w"),
+    }
+
+    if action_name == "charge":
+        return result(
+            "Planned Charge",
+            "Charge",
+            "The action was selected before the half-hour boundary as a cheap charge slot.",
+            **action_attrs,
+        )
+    if soc_percent <= reserve_soc + 0.5:
+        return result(
+            "Reserve Protection",
+            "Self-Gen/Zero Export",
+            "Battery SOC is at the configured reserve; fixed discharge is prohibited.",
+            **action_attrs,
+        )
+    if action_name == "discharge":
+        return result(
+            "Peak Self-Gen",
+            "Self-Gen/Zero Export",
+            "Use CT-controlled Self-Gen during this selected profitable period.",
+            **action_attrs,
+        )
+
+    inferred_pv_charge_w = max(0.0, total_charge_power_w - ac_charge_power_w)
+    solar_active = max(0.0, pv_power_w) >= 50 or inferred_pv_charge_w >= 50
+    if solar_active:
+        return result(
+            "Solar Self-Gen",
+            "Self-Gen/Zero Export",
+            "Useful PV is present; preserve normal solar capture and CT-controlled flows.",
+            **action_attrs,
+        )
+
+    future_discharges = []
+    for slot in plan.get("slots", []):
+        if not isinstance(slot, Mapping) or slot.get("action") != "discharge":
+            continue
+        try:
+            start = datetime.fromisoformat(str(slot.get("start")))
+        except ValueError:
+            continue
+        if start.tzinfo is not None and start > now:
+            future_discharges.append(start)
+    if future_discharges and pv_quiet_minutes >= 15:
+        return result(
+            "Post-solar Hold",
+            "Idle",
+            "PV has remained negligible and a later selected discharge period remains.",
+            next_discharge_at=min(future_discharges).isoformat(),
+            **action_attrs,
+        )
+
+    return result(
+        "Solar Self-Gen",
+        "Self-Gen/Zero Export",
+        "No locked Agile action requires a mode change; Self-Gen remains the safe default.",
+        **action_attrs,
+    )

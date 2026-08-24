@@ -56,7 +56,7 @@ def _plan(day: str = "2026-07-27", **overrides: object) -> dict[str, object]:
     return AGILE.build_agile_day_plan(_rates(day), **values)
 
 
-def test_discharge_is_capped_at_800w_system_wide() -> None:
+def test_discharge_plan_command_is_capped_at_800w() -> None:
     plan = _plan(max_discharge_power_w=1200)
 
     discharge_slots = [slot for slot in plan["slots"] if slot["action"] == "discharge"]
@@ -172,7 +172,7 @@ def test_starting_below_reserve_is_recoverable_and_not_invalid() -> None:
         starting_soc=11,
         reserve_soc=15,
         demand_profile_kwh={"19:00": 0.2},
-        demand_profile_revision="shadow_2026_08_median_v2",
+        demand_profile_revision="shadow_2026_08_net_median_v3",
     )
 
     assert plan["status"] == "proposed"
@@ -180,7 +180,7 @@ def test_starting_below_reserve_is_recoverable_and_not_invalid() -> None:
     assert plan["reserve_recovery_stored_kwh"] == 0.078
     assert plan["planned_grid_charge_kwh"] > 0
     assert plan["planner_revision"] == 2
-    assert plan["demand_profile_revision"] == "shadow_2026_08_median_v2"
+    assert plan["demand_profile_revision"] == "shadow_2026_08_net_median_v3"
 
 
 def test_unrecoverable_below_reserve_plan_never_creates_discharge_energy() -> None:
@@ -202,6 +202,132 @@ def test_out_of_range_starting_soc_still_fails_safe() -> None:
         plan = _plan(starting_soc=starting_soc, reserve_soc=15)
         assert plan["status"] == "invalid"
         assert plan["slots"] == []
+
+
+def test_shadow_decision_preserves_solar_and_uses_locked_actions() -> None:
+    now = datetime(2026, 8, 24, 16, 0, tzinfo=ZoneInfo("Europe/London"))
+    plan = {
+        "status": "proposed",
+        "slots": [
+            {
+                "start": now.isoformat(),
+                "end": (now + timedelta(minutes=30)).isoformat(),
+                "action": "hold",
+            }
+        ],
+    }
+    locked_charge = {
+        "start": now.isoformat(),
+        "end": (now + timedelta(minutes=30)).isoformat(),
+        "action": "charge",
+        "energy_kwh": 0.4,
+        "command_power_limit_w": 800,
+        "decision_source": "pre_boundary_lock",
+    }
+
+    charge = AGILE.build_agile_shadow_decision(
+        plan,
+        now=now,
+        connection_fresh=True,
+        soc_percent=40,
+        reserve_soc=15,
+        pv_power_w=300,
+        total_charge_power_w=0,
+        ac_charge_power_w=0,
+        pv_quiet_minutes=0,
+        locked_action=locked_charge,
+    )
+    solar = AGILE.build_agile_shadow_decision(
+        plan,
+        now=now,
+        connection_fresh=True,
+        soc_percent=40,
+        reserve_soc=15,
+        pv_power_w=300,
+        total_charge_power_w=0,
+        ac_charge_power_w=0,
+        pv_quiet_minutes=0,
+    )
+
+    assert charge["state"] == "Planned Charge"
+    assert charge["recommended_operating_mode"] == "Charge"
+    assert charge["planned_action_source"] == "pre_boundary_lock"
+    assert solar["state"] == "Solar Self-Gen"
+    assert solar["recommended_operating_mode"] == "Self-Gen/Zero Export"
+    assert solar["control_enabled"] is False
+
+
+def test_shadow_decision_holds_only_after_solar_is_quiet() -> None:
+    now = datetime(2026, 8, 24, 19, 0, tzinfo=ZoneInfo("Europe/London"))
+    plan = {
+        "status": "limited",
+        "slots": [
+            {
+                "start": (now + timedelta(minutes=30)).isoformat(),
+                "end": (now + timedelta(minutes=60)).isoformat(),
+                "action": "discharge",
+            }
+        ],
+    }
+    hold = AGILE.build_agile_shadow_decision(
+        plan,
+        now=now,
+        connection_fresh=True,
+        soc_percent=70,
+        reserve_soc=15,
+        pv_power_w=0,
+        total_charge_power_w=0,
+        ac_charge_power_w=0,
+        pv_quiet_minutes=20,
+    )
+    not_quiet = AGILE.build_agile_shadow_decision(
+        plan,
+        now=now,
+        connection_fresh=True,
+        soc_percent=70,
+        reserve_soc=15,
+        pv_power_w=0,
+        total_charge_power_w=0,
+        ac_charge_power_w=0,
+        pv_quiet_minutes=5,
+    )
+
+    assert hold["state"] == "Post-solar Hold"
+    assert hold["recommended_operating_mode"] == "Idle"
+    assert not_quiet["recommended_operating_mode"] == "Self-Gen/Zero Export"
+
+
+def test_shadow_decision_fails_safe_for_stale_connection_or_reserve() -> None:
+    now = datetime(2026, 8, 24, 19, 0, tzinfo=ZoneInfo("Europe/London"))
+    plan = {"status": "proposed", "slots": []}
+    stale = AGILE.build_agile_shadow_decision(
+        plan,
+        now=now,
+        connection_fresh=False,
+        soc_percent=80,
+        reserve_soc=15,
+        pv_power_w=0,
+        total_charge_power_w=0,
+        ac_charge_power_w=0,
+        pv_quiet_minutes=30,
+    )
+    reserve = AGILE.build_agile_shadow_decision(
+        plan,
+        now=now,
+        connection_fresh=True,
+        soc_percent=15,
+        reserve_soc=15,
+        pv_power_w=0,
+        total_charge_power_w=0,
+        ac_charge_power_w=0,
+        pv_quiet_minutes=30,
+        locked_action={"action": "discharge"},
+    )
+
+    assert stale["state"] == "Connection Fail-safe"
+    assert stale["recommended_operating_mode"] == "Self-Gen/Zero Export"
+    assert reserve["state"] == "Reserve Protection"
+    assert reserve["recommended_operating_mode"] == "Self-Gen/Zero Export"
 
 
 def test_rates_are_gbp_and_savings_are_not_divided_by_100() -> None:

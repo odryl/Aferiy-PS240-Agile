@@ -83,8 +83,8 @@ export_agile_plan:
     Appends the current read-only Today and Tomorrow Agile plans, battery state,
     grid/PV/charge/discharge readings, and household-demand measurements to
     /config/aecc_battery_agile_plan_export.jsonl for shadow-mode trial analysis.
-    The export excludes MPAN and rate-source entity IDs and does not send any
-    battery command.
+    The active file rotates at 8 MiB into timestamped gzip archives. The export
+    excludes MPAN and rate-source entity IDs and does not send any battery command.
   fields:
     label:
       name: Label

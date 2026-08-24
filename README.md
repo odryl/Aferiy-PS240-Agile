@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.14-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.15-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe, view-only Octopus Agile battery planner.
@@ -34,9 +34,9 @@ compatible. This fork appears in Home Assistant as **AFERIY PS240 Agile**.
 - Custom AFERIY PS240 icon
 - Bundled AFERIY Overnight Plan dashboard card
 - View-only Octopus Agile Proposed Plans for today and tomorrow
-- Strict 800 W total-system Agile discharge ceiling (0.4 kWh per half-hour)
+- Conservative 800 W Agile command limit (0.4 kWh per half-hour)
 - GBP/kWh profitability checks and malformed/stale tariff-data safeguards
-- Household-demand-aware planning based on an anonymized half-hour profile
+- PV-adjusted net-demand planning based on an anonymized half-hour profile
 - Connection health and last-command result sensors
 - Optional one-hour manual Self-Gen restore queue for PS240 Wi-Fi outages
 - Local data logger restart button and opt-in three-hour automatic restart
@@ -169,15 +169,16 @@ missing or unusable, Today safely retains its existing same-day calculation.
 
 The plan aims for 100% SOC by 16:00, protects expected household demand until
 22:00, and only proposes discharge when the avoided import price exceeds the
-estimated delivered replacement cost by at least £0.03/kWh. The Agile ceiling
-is always **800 W for the whole battery system**, never per battery module.
+estimated delivered replacement cost by at least £0.03/kWh. Proposed Agile
+commands are conservatively capped at **800 W**; device-managed Self-Gen output
+may differ while its CT follows household demand.
 
-Solar forecasts are not yet deducted from the Agile half-hour demand profile.
-The advanced fixed-window overnight estimates already support timed Solcast
-data. For a future provider-neutral Agile implementation, Home Assistant's
-Energy Dashboard solar-forecast interface is the preferred input; the built-in
-Forecast.Solar integration is one supported provider. Until that input is wired
-into the Agile planner, PV forecast must not be assumed in its savings figures.
+The fallback Agile profile subtracts historical measured PV from household
+demand. Live forecast values are not yet deducted. The shadow sensor discovers
+the solar-forecast providers selected in Home Assistant's Energy Dashboard so
+a future provider-neutral stage can consume their timestamped forecasts. Until
+that is wired into the planner, forecast PV must not be assumed in its savings
+figures.
 
 ## Create an Agile Dashboard
 
@@ -189,7 +190,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.14`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.15`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 
@@ -230,10 +231,11 @@ type: custom:aferiy-agile-plan-card
 title: Octopus Agile Battery Plan
 today_entity: sensor.your_battery_agile_proposed_plan_today
 tomorrow_entity: sensor.your_battery_agile_proposed_plan_tomorrow
+shadow_entity: sensor.your_battery_agile_shadow_operating_state
 ```
 
 Find the exact entity IDs under **Developer Tools → States** by searching for
-`agile_proposed_plan`.
+`agile_proposed_plan` or `agile_shadow_operating_state`.
 
 ### 4. Add live battery status (optional)
 
@@ -300,19 +302,23 @@ trigger:
 action:
   - service: aecc_battery.export_agile_plan
     data:
-      label: post_calibration_v2
+      label: shadow_decision_v3
 mode: single
 ```
 
-Schema-v2 records include `planner_revisions` and
+Schema-v3 records include `planner_revisions` and
 `demand_profile_revisions`, plus cumulative PV generation, battery charge, and
 battery discharge energy. They also record the active operating mode, last
-local command, commanded direction, and overnight scheduler state. This allows
-Self-Gen/Zero Export discharge and manual charging to be separated from the
-read-only Agile recommendation. If continuing an existing export file after an
-upgrade, keep the automation running and change its label as above; the revision
-fields separate the new trial phase without requiring the older records to be
-deleted.
+local command, commanded direction, connection freshness, overnight scheduler
+state, and the shadow operating decision. This allows Self-Gen/Zero Export
+discharge and manual charging to be separated from the read-only Agile
+recommendation.
+
+The active JSONL rotates automatically at 8 MiB. The completed segment is
+preserved beside it as a timestamped `.jsonl.gz` archive and the next sample
+starts a fresh active file. Download the archives for long-term retention; send
+only the current segment for routine analysis. Existing schema-v1/v2 history
+does not need to be deleted.
 
 After the trial, download the file using the File Editor, Samba share, or your
 usual Home Assistant backup method. The **AECC Agile Plan Export** sensor shows
