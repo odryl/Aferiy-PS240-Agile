@@ -43,3 +43,25 @@ smart_history_entity: sensor.aferiy_ps240_local_smart_history
 ```
 
 The card reads the calculation from the Recommended Overnight SOC sensor. It does not make charging decisions itself.
+
+## Wi-Fi Loss Recovery Card
+
+The separate guarded recovery card is available at:
+
+```text
+/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.17
+```
+
+After registering it as a JavaScript module, add **AFERIY Wi-Fi Loss Recovery**
+from the card picker or use:
+
+```yaml
+type: custom:aferiy-wifi-recovery-card
+title: Wi-Fi loss recovery
+```
+
+The card shows whether the PS240 is available, the current and next Linksys
+2.4 GHz channels, consecutive failures, the grace deadline, and the opt-in
+switch. Its 0–60 minute grace-period control is persisted by the integration;
+valid telemetry before the deadline cancels the channel change. It never
+receives or displays router credentials or Wi-Fi passphrases.

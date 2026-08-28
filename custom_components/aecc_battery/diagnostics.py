@@ -75,6 +75,9 @@ _REDACT_KEYS = {
     "wifi_password",
     "wifiPassword",
     "WifiPassword",
+    "router_password",
+    "wifi_loss_recovery_router_password",
+    "X-JNAP-Authorization",
     "mac",
     "MAC",
     "mac_address",
@@ -151,6 +154,10 @@ async def async_get_config_entry_diagnostics(
         "max_register_power": coordinator.max_register_power,
         "brand_profile": dict(coordinator.brand_profile),
         "poll_interval_seconds": poll_seconds,
+        "wifi_loss_recovery_configured": bool(
+            coordinator.wifi_loss_recovery_controller
+            and coordinator.wifi_loss_recovery_controller.configured
+        ),
     }
 
     live_state_section = {
@@ -171,6 +178,12 @@ async def async_get_config_entry_diagnostics(
         "commanded_direction": coordinator.commanded_direction,
         "agile_control_enabled": coordinator.agile_control_enabled,
         "agile_control_pending_restore": coordinator.agile_control_pending_restore,
+        "wifi_loss_recovery_enabled": coordinator.wifi_loss_recovery_enabled,
+        "wifi_loss_recovery": (
+            coordinator.wifi_loss_recovery_controller.state_attributes
+            if coordinator.wifi_loss_recovery_controller is not None
+            else None
+        ),
         "commanded_min_soc": coordinator._commanded_min_soc,
         "commanded_max_soc": coordinator._commanded_max_soc,
         "initial_min_soc": coordinator.initial_min_soc,

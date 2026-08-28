@@ -54,6 +54,8 @@ from .const import (
     REG_SURPLUS_CHARGE_TRIGGER,
     SLOT_DISABLED,
     TARIFF_PRESETS,
+    WIFI_LOSS_RECOVERY_DEFAULT_GRACE_MINUTES,
+    WIFI_LOSS_RECOVERY_MAX_GRACE_MINUTES,
 )
 from .tcp_client import AeccTcpClient
 
@@ -195,6 +197,13 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.agile_control_enabled: bool = False
         self.agile_control_pending_restore: bool = False
         self.agile_controller: Any | None = None
+        self.wifi_loss_recovery_enabled: bool = False
+        self.wifi_loss_recovery_grace_period_minutes: int = (
+            WIFI_LOSS_RECOVERY_DEFAULT_GRACE_MINUTES
+        )
+        self.wifi_loss_recovery_controller: Any | None = None
+        self.wifi_loss_recovery_last_attempt_at: datetime | None = None
+        self.wifi_loss_recovery_last_channel: int | None = None
         self.next_datalogger_restart_at: datetime | None = None
         self.last_datalogger_restart_at: datetime | None = None
         self.last_datalogger_restart_reason: str | None = None
@@ -343,6 +352,7 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._consecutive_failures += 1
             self.last_failed_update = datetime.now(UTC)
             self.last_failure_reason = str(exc)
+            self._notify_wifi_loss_recovery_failure()
             if self._consecutive_failures <= self._failure_tolerance and self._last_good_data is not None:
                 _LOGGER.debug(
                     "Poll failed (%d/%d) - keeping last known data: %s",
@@ -362,6 +372,7 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._consecutive_failures += 1
             self.last_failed_update = datetime.now(UTC)
             self.last_failure_reason = invalid_reason
+            self._notify_wifi_loss_recovery_failure()
             if self._consecutive_failures in (1, self._failure_tolerance):
                 try:
                     await self.client.async_reconnect()
@@ -389,7 +400,10 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.last_failure_reason = reason
             raise UpdateFailed(reason)
 
+        recovered_from_failures = self._consecutive_failures > 0
         self._consecutive_failures = 0
+        if recovered_from_failures and self.wifi_loss_recovery_controller is not None:
+            self.wifi_loss_recovery_controller.async_poll_recovered()
 
         reported_storage_topology = tuple(self._storage_units_by_key(raw))
         self._last_reported_storage_topology = reported_storage_topology
@@ -439,6 +453,16 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._async_maybe_restore_abandoned_agile_control()
         self._schedule_overnight_evaluation()
         return raw
+
+    def _notify_wifi_loss_recovery_failure(self) -> None:
+        """Notify the router controller without delaying battery polling."""
+        controller = self.wifi_loss_recovery_controller
+        if controller is None:
+            return
+        controller.async_poll_failed(
+            self._consecutive_failures,
+            self._failure_tolerance,
+        )
 
     async def _async_maybe_refresh_device_management(self) -> None:
         """Refresh slower-changing device metadata without affecting live polling."""
@@ -533,6 +557,27 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.auto_datalogger_restart_enabled = bool(
             data.get("auto_datalogger_restart_enabled", False)
         )
+        self.wifi_loss_recovery_enabled = bool(
+            data.get("wifi_loss_recovery_enabled", False)
+        )
+        recovery_grace = self._safe_int(
+            data.get("wifi_loss_recovery_grace_period_minutes")
+        )
+        if recovery_grace is not None:
+            self.wifi_loss_recovery_grace_period_minutes = max(
+                0, min(WIFI_LOSS_RECOVERY_MAX_GRACE_MINUTES, recovery_grace)
+            )
+        recovery_attempt_at = data.get("wifi_loss_recovery_last_attempt_at")
+        if isinstance(recovery_attempt_at, str):
+            try:
+                parsed_recovery_attempt = datetime.fromisoformat(recovery_attempt_at)
+            except ValueError:
+                parsed_recovery_attempt = None
+            if parsed_recovery_attempt is not None and parsed_recovery_attempt.tzinfo is not None:
+                self.wifi_loss_recovery_last_attempt_at = parsed_recovery_attempt.astimezone(UTC)
+        recovery_channel = self._safe_int(data.get("wifi_loss_recovery_last_channel"))
+        if recovery_channel in (6, 11):
+            self.wifi_loss_recovery_last_channel = recovery_channel
         self.agile_control_pending_restore = bool(
             data.get("agile_control_pending_restore", False)
         )
@@ -572,6 +617,16 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "auto_datalogger_restart_enabled": bool(
                 self.auto_datalogger_restart_enabled
             ),
+            "wifi_loss_recovery_enabled": bool(self.wifi_loss_recovery_enabled),
+            "wifi_loss_recovery_grace_period_minutes": int(
+                self.wifi_loss_recovery_grace_period_minutes
+            ),
+            "wifi_loss_recovery_last_attempt_at": (
+                self.wifi_loss_recovery_last_attempt_at.isoformat()
+                if self.wifi_loss_recovery_last_attempt_at is not None
+                else None
+            ),
+            "wifi_loss_recovery_last_channel": self.wifi_loss_recovery_last_channel,
             "agile_control_pending_restore": bool(
                 self.agile_control_pending_restore
             ),
@@ -652,6 +707,9 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         controller = self.agile_controller
         if controller is not None:
             await controller.async_shutdown()
+        wifi_recovery_controller = self.wifi_loss_recovery_controller
+        if wifi_recovery_controller is not None:
+            await wifi_recovery_controller.async_shutdown()
         tasks = [
             task
             for task in (self._auto_datalogger_restart_task, self._overnight_task)

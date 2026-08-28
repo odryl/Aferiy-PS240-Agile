@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.8.17
+
+- Add opt-in **Wi-Fi Loss Recovery** for compatible Linksys routers. After the
+  PS240 crosses the existing five-poll hold into actual unavailability, it
+  alternates the 2.4 GHz radio between channel 6 and 11 once per outage,
+  verifies the router-reported result, and waits for battery telemetry.
+- Preserve all existing radio/security and split-SSID settings, validate local
+  Linksys WirelessAP4 access before enabling, persist a one-hour cooldown, and
+  keep router credentials and Wi-Fi passphrases out of entities, logs, and
+  diagnostics.
+- Add a dedicated AFERIY Wi-Fi Loss Recovery dashboard card with opt-in control,
+  channel, poll-failure, cooldown, and recovery status.
+- Add a persisted 0–60 minute Wi-Fi recovery grace period. Valid battery
+  telemetry during the wait cancels the pending router channel change, while a
+  value of 0 preserves immediate recovery.
+
 ## 1.8.16
 
 - Add an opt-in **Agile Automated Control** switch for a guarded beta control

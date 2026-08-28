@@ -13,7 +13,7 @@ import logging
 
 from homeassistant.components.number import NumberDeviceClass, NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfPower
+from homeassistant.const import PERCENTAGE, UnitOfPower, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -27,6 +27,7 @@ from .const import (
     MIN_CHARGE_POWER_W,
     OVERNIGHT_CHARGE_MODE_MANUAL,
     PS240_EXPERIMENTAL_MAX_OUTPUT_W,
+    WIFI_LOSS_RECOVERY_MAX_GRACE_MINUTES,
 )
 from .coordinator import AeccBatteryCoordinator
 
@@ -49,6 +50,7 @@ async def async_setup_entry(
             AeccManualOvernightChargeTarget(coordinator, config_entry),
             AeccMinSoc(coordinator, config_entry),
             AeccMaxSoc(coordinator, config_entry),
+            AeccWifiRecoveryGracePeriod(coordinator, config_entry),
         ]
     )
 
@@ -56,6 +58,49 @@ async def async_setup_entry(
 def _clamp_number(value: float, minimum: float, maximum: float) -> float:
     """Clamp a number to the supplied range."""
     return max(minimum, min(value, maximum))
+
+
+class AeccWifiRecoveryGracePeriod(
+    CoordinatorEntity[AeccBatteryCoordinator], NumberEntity
+):
+    """Delay router recovery so the battery can reconnect on its own."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Wi-Fi Recovery Grace Period"
+    _attr_icon = "mdi:timer-sand"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_native_min_value = 0
+    _attr_native_max_value = WIFI_LOSS_RECOVERY_MAX_GRACE_MINUTES
+    _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinator: AeccBatteryCoordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{config_entry.entry_id}_wifi_recovery_grace_period"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return self.coordinator.device_info
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def native_value(self) -> float:
+        return float(self.coordinator.wifi_loss_recovery_grace_period_minutes)
+
+    async def async_set_native_value(self, value: float) -> None:
+        minutes = int(
+            _clamp_number(value, 0, WIFI_LOSS_RECOVERY_MAX_GRACE_MINUTES)
+        )
+        self.coordinator.wifi_loss_recovery_grace_period_minutes = minutes
+        await self.coordinator.async_save_runtime_preferences()
+        controller = self.coordinator.wifi_loss_recovery_controller
+        if controller is not None:
+            await controller.async_grace_period_changed()
+        self.async_write_ha_state()
 
 
 class AeccPassivePowerSlider(

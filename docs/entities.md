@@ -18,6 +18,7 @@ Core entities focus on data and controls that come directly from the local batte
 - House Demand Energy and House Demand Daily
 - Battery Status
 - Connection Status
+- Wi-Fi Loss Recovery (configuration switch; off by default)
 
 Charge Power can be selected from `200 W` to `1200 W` per unit in `100 W`
 steps. New installations start at `800 W`. Discharge Power remains limited to
@@ -134,3 +135,16 @@ The options page includes confirmation checkboxes for common external helpers:
 - Home occupancy through `zone.home`, for empty-house demand handling
 
 These checkboxes are installer reminders. They do not install integrations or block setup.
+
+## Wi-Fi Loss Recovery
+
+`Wi-Fi Loss Recovery` is an opt-in configuration switch for a compatible local
+Linksys router. Enabling it first validates the router identity, WirelessAP4
+capability, administrator password, and current 2.4 GHz channel without changing
+settings. After the battery becomes unavailable following six consecutive poll
+failures, the `Wi-Fi Recovery Grace Period` number waits 0–60 minutes before one
+verified channel 6/11 toggle. Valid battery telemetry during this grace period
+cancels the pending change. Entity attributes expose status, reason,
+current/requested channel, grace deadline, poll count, last result, and cooldown
+timing, but never the router address, administrator password, SSID, or Wi-Fi
+passphrase.

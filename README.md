@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.16-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.17-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe Octopus Agile battery planner and opt-in guarded automation.
@@ -41,6 +41,7 @@ compatible. This fork appears in Home Assistant as **AFERIY PS240 Agile**.
 - Connection health and last-command result sensors
 - Optional one-hour manual Self-Gen restore queue for PS240 Wi-Fi outages
 - Local data logger restart button and opt-in three-hour automatic restart
+- Opt-in Linksys Wi-Fi loss recovery that alternates 2.4 GHz channel 6 and 11
 - Grid meter agreement and charging reason diagnostics
 
 ## Before You Install
@@ -115,6 +116,53 @@ The restart applies to the Wi-Fi/BLE data logger, not the PS240 battery power
 electronics. Its local connection should disappear briefly after each command
 and polling will reconnect automatically. Do not use the control during a
 firmware update or while changing the logger's network settings.
+
+### Recover from sustained PS240 Wi-Fi loss
+
+The optional **Wi-Fi Loss Recovery** controller is intended for the tested
+Linksys SPNMX56TB/Velop JNAP interface. Configure the Linksys router address and
+local administrator password under **Settings → Devices & services → AFERIY
+PS240 Agile → Configure**, then enable the device's **Wi-Fi Loss Recovery**
+switch. The password is used only for local HTTPS requests from Home Assistant;
+it is never exposed as an entity attribute or included in diagnostics.
+
+The controller does nothing during the integration's five-poll last-known-data
+hold. If the sixth consecutive poll fails and the battery becomes unavailable,
+its **Wi-Fi Recovery Grace Period** begins. Set this number entity from 0 to 60
+minutes; 0 changes the channel immediately. If valid battery telemetry returns
+during the grace period, the pending router change is cancelled. Otherwise it
+reads the current 2.4 GHz radio configuration and makes one verified change:
+channel 6 becomes 11, or channel 11 becomes 6. SSID, password, security, channel
+width, 5 GHz settings, and split-SSID/band-steering state are preserved.
+
+Recovery is off by default and fails closed if the router is not Linksys, does
+not advertise the required WirelessAP4 service, rejects authentication, or is
+using a channel other than 6 or 11. Only one change is attempted per outage and
+a one-hour cooldown survives Home Assistant restarts. A wired Home Assistant
+connection is recommended so changing the 2.4 GHz radio cannot interrupt the
+controller itself.
+
+For a dedicated dashboard area, register this JavaScript module under
+**Settings → Dashboards → Resources**:
+
+```text
+/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.17
+```
+
+Then add **AFERIY Wi-Fi Loss Recovery** from the card picker, or use:
+
+```yaml
+type: custom:aferiy-wifi-recovery-card
+title: Wi-Fi loss recovery
+```
+
+With multiple AFERIY entries, add the matching switch explicitly:
+
+```yaml
+type: custom:aferiy-wifi-recovery-card
+entity: switch.your_battery_wifi_loss_recovery
+grace_entity: number.your_battery_wifi_recovery_grace_period
+```
 
 System-level readings are reported through the master. System Average Battery SOC is the main multi-unit SOC source and matches the behaviour shown in the AEC Cloud app.
 
@@ -193,7 +241,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.16`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.17`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 

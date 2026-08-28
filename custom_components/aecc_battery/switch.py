@@ -12,6 +12,7 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -28,6 +29,8 @@ from .const import (
     OVERNIGHT_CHARGE_MODE_DISABLED,
 )
 from .coordinator import AeccBatteryCoordinator
+from .linksys_jnap import LinksysJnapError
+from .wifi_recovery import WifiLossRecoveryController
 
 _LOGGER = logging.getLogger(__name__)
 _AGILE_CONTROLLER_REVISION = 1
@@ -44,8 +47,71 @@ async def async_setup_entry(
         [
             AeccAutomaticDataloggerRestartSwitch(coordinator, config_entry),
             AeccAgileAutomaticControlSwitch(coordinator, config_entry),
+            AeccWifiLossRecoverySwitch(coordinator, config_entry),
         ]
     )
+
+
+class AeccWifiLossRecoverySwitch(
+    CoordinatorEntity[AeccBatteryCoordinator], SwitchEntity
+):
+    """Opt in to one guarded Linksys 6/11 toggle per battery outage."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Wi-Fi Loss Recovery"
+    _attr_icon = "mdi:wifi-refresh"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        coordinator: AeccBatteryCoordinator,
+        config_entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{config_entry.entry_id}_wifi_loss_recovery"
+
+    @property
+    def controller(self) -> WifiLossRecoveryController:
+        return self.coordinator.wifi_loss_recovery_controller
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return self.coordinator.device_info
+
+    @property
+    def is_on(self) -> bool:
+        return self.controller.enabled
+
+    @property
+    def available(self) -> bool:
+        # Keep the opt-in accessible during an outage so recovery can always
+        # be disabled without waiting for battery telemetry.
+        return True
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return self.controller.state_attributes
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.controller.set_state_callback(self.async_write_ha_state)
+        self.controller.refresh_status()
+
+    async def async_will_remove_from_hass(self) -> None:
+        self.controller.set_state_callback(None)
+        await super().async_will_remove_from_hass()
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        try:
+            await self.controller.async_enable()
+        except LinksysJnapError as exc:
+            self.async_write_ha_state()
+            raise HomeAssistantError(str(exc)) from exc
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.controller.async_disable()
+        self.async_write_ha_state()
 
 
 class AeccAgileAutomaticControlSwitch(

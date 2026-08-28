@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import slugify
 
 from .agile_export import append_agile_json_line
@@ -30,18 +31,22 @@ from .const import (
     CONF_OVERNIGHT_CHARGING_MODE,
     CONF_PORT,
     CONF_TARIFF_PRESET,
+    CONF_WIFI_LOSS_RECOVERY_ROUTER_HOST,
+    CONF_WIFI_LOSS_RECOVERY_ROUTER_PASSWORD,
     DEFAULT_BRAND_PROFILE,
     DEFAULT_OFF_PEAK_END,
     DEFAULT_OFF_PEAK_START,
     DEFAULT_OVERNIGHT_CHARGE_MODE,
     DEFAULT_TARIFF_PRESET,
     DEFAULT_TIMEOUT,
+    DEFAULT_WIFI_LOSS_RECOVERY_ROUTER_HOST,
     DOMAIN,
 )
 from .coordinator import AeccBatteryCoordinator
 from .diagnostics import _fetch_control_registers
 from .tcp_client import AeccTcpClient
 from .tcp_manager import TCPClientManager
+from .wifi_recovery import WifiLossRecoveryController
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -205,6 +210,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             CONF_OVERNIGHT_CHARGING_MODE,
             DEFAULT_OVERNIGHT_CHARGE_MODE,
         ),
+    )
+    coordinator.wifi_loss_recovery_controller = WifiLossRecoveryController(
+        coordinator,
+        async_get_clientsession(hass),
+        entry.options.get(
+            CONF_WIFI_LOSS_RECOVERY_ROUTER_HOST,
+            DEFAULT_WIFI_LOSS_RECOVERY_ROUTER_HOST,
+        ),
+        entry.options.get(CONF_WIFI_LOSS_RECOVERY_ROUTER_PASSWORD, ""),
     )
     await coordinator.async_config_entry_first_refresh()
 

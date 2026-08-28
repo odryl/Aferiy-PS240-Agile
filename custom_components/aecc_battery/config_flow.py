@@ -34,6 +34,8 @@ from .const import (
     CONF_POLL_INTERVAL,
     CONF_PORT,
     CONF_TARIFF_PRESET,
+    CONF_WIFI_LOSS_RECOVERY_ROUTER_HOST,
+    CONF_WIFI_LOSS_RECOVERY_ROUTER_PASSWORD,
     DEFAULT_AGILE_PLANNER_ENABLED,
     DEFAULT_AGILE_PROTECTED_UNTIL,
     DEFAULT_AGILE_READY_BY,
@@ -45,6 +47,7 @@ from .const import (
     DEFAULT_OFF_PEAK_START,
     DEFAULT_PORT,
     DEFAULT_TARIFF_PRESET,
+    DEFAULT_WIFI_LOSS_RECOVERY_ROUTER_HOST,
     DOMAIN,
     MIN_POLL_INTERVAL,
     POLL_INTERVAL,
@@ -211,6 +214,7 @@ class AeccBatteryOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         if user_input is not None:
+            current_options = self._entry.options
             errors: dict[str, str] = {}
             selected_device = user_input.get(_DISCOVERED_DEVICE_FIELD, _DISCOVERED_DEVICE_MANUAL)
             if selected_device in self._discovered_devices:
@@ -282,6 +286,17 @@ class AeccBatteryOptionsFlow(config_entries.OptionsFlow):
                 CONF_DEPENDENCY_HOME_OCCUPANCY: user_input.get(
                     _DEPENDENCY_HOME_OCCUPANCY_FIELD,
                     user_input.get(CONF_DEPENDENCY_HOME_OCCUPANCY, False),
+                ),
+                CONF_WIFI_LOSS_RECOVERY_ROUTER_HOST: user_input.get(
+                    CONF_WIFI_LOSS_RECOVERY_ROUTER_HOST,
+                    current_options.get(
+                        CONF_WIFI_LOSS_RECOVERY_ROUTER_HOST,
+                        DEFAULT_WIFI_LOSS_RECOVERY_ROUTER_HOST,
+                    ),
+                ).strip(),
+                CONF_WIFI_LOSS_RECOVERY_ROUTER_PASSWORD: user_input.get(
+                    CONF_WIFI_LOSS_RECOVERY_ROUTER_PASSWORD,
+                    current_options.get(CONF_WIFI_LOSS_RECOVERY_ROUTER_PASSWORD, ""),
                 ),
             }
             self.hass.config_entries.async_update_entry(
@@ -382,6 +397,26 @@ class AeccBatteryOptionsFlow(config_entries.OptionsFlow):
                         source.get(CONF_DEPENDENCY_HOME_OCCUPANCY, False),
                     ),
                 ): bool,
+                vol.Optional(
+                    CONF_WIFI_LOSS_RECOVERY_ROUTER_HOST,
+                    default=source.get(
+                        CONF_WIFI_LOSS_RECOVERY_ROUTER_HOST,
+                        DEFAULT_WIFI_LOSS_RECOVERY_ROUTER_HOST,
+                    ),
+                ): str,
+                vol.Optional(
+                    CONF_WIFI_LOSS_RECOVERY_ROUTER_PASSWORD,
+                    description={
+                        "suggested_value": source.get(
+                            CONF_WIFI_LOSS_RECOVERY_ROUTER_PASSWORD,
+                            "",
+                        )
+                    },
+                ): selector.TextSelector(
+                    selector.TextSelectorConfig(
+                        type=selector.TextSelectorType.PASSWORD,
+                    )
+                ),
             }
         )
 

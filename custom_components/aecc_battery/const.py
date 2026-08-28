@@ -22,6 +22,8 @@ CONF_AGILE_CURRENT_DAY_RATES_ENTITY = "agile_current_day_rates_entity"
 CONF_AGILE_NEXT_DAY_RATES_ENTITY = "agile_next_day_rates_entity"
 CONF_AGILE_READY_BY = "agile_ready_by"
 CONF_AGILE_PROTECTED_UNTIL = "agile_protected_until"
+CONF_WIFI_LOSS_RECOVERY_ROUTER_HOST = "wifi_loss_recovery_router_host"
+CONF_WIFI_LOSS_RECOVERY_ROUTER_PASSWORD = "wifi_loss_recovery_router_password"
 
 # Default connection values
 DEFAULT_HOST = "192.168.0.1"
@@ -41,6 +43,12 @@ DEFAULT_OVERNIGHT_CHARGE_MODE = OVERNIGHT_CHARGE_MODE_DISABLED
 DEFAULT_AGILE_PLANNER_ENABLED = True
 DEFAULT_AGILE_READY_BY = "16:00"
 DEFAULT_AGILE_PROTECTED_UNTIL = "22:00"
+DEFAULT_WIFI_LOSS_RECOVERY_ROUTER_HOST = "192.168.0.1"
+WIFI_LOSS_RECOVERY_CHANNELS = (6, 11)
+WIFI_LOSS_RECOVERY_COOLDOWN_HOURS = 1
+WIFI_LOSS_RECOVERY_DEFAULT_GRACE_MINUTES = 0
+WIFI_LOSS_RECOVERY_MAX_GRACE_MINUTES = 60
+WIFI_LOSS_RECOVERY_VERIFY_SECONDS = 45
 
 # Confirmed system-level limits used by Agile planning. AC grid charging and
 # CT-controlled household supply have different ceilings; neither value changes
