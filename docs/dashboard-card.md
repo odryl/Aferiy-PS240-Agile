@@ -49,7 +49,7 @@ The card reads the calculation from the Recommended Overnight SOC sensor. It doe
 The separate guarded recovery card is available at:
 
 ```text
-/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.17
+/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.18
 ```
 
 After registering it as a JavaScript module, add **AFERIY Wi-Fi Loss Recovery**

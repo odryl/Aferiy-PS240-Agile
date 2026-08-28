@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.18
+
+- Keep the Wi-Fi recovery regression tests independent of Home Assistant's
+  runtime `aiohttp` dependency so the repository's minimal CI test job passes.
+
 ## 1.8.17
 
 - Add opt-in **Wi-Fi Loss Recovery** for compatible Linksys routers. After the

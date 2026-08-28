@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
+import types
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 INTEGRATION = ROOT / "custom_components" / "aecc_battery"
+
+# The CI regression-test environment intentionally installs only pytest, while
+# Home Assistant supplies aiohttp at runtime. Stub just the imported types so
+# the pure request-building helpers remain testable without adding HA's stack.
+if "aiohttp" not in sys.modules:
+    aiohttp_stub = types.ModuleType("aiohttp")
+    aiohttp_stub.ClientError = type("ClientError", (Exception,), {})
+    aiohttp_stub.ClientSession = type("ClientSession", (), {})
+    sys.modules["aiohttp"] = aiohttp_stub
 
 spec = importlib.util.spec_from_file_location(
     "linksys_jnap_under_test",
