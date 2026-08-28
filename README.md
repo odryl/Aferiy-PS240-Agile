@@ -3,21 +3,21 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.15-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.16-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
-safe, view-only Octopus Agile battery planner.
+safe Octopus Agile battery planner and opt-in guarded automation.
 
 It is based on [MortUK/Aferiy-PS240-Local-](https://github.com/MortUK/Aferiy-PS240-Local-)
 and retains the `aecc_battery` integration domain, so existing entity IDs remain
 compatible. This fork appears in Home Assistant as **AFERIY PS240 Agile**.
 
 > [!IMPORTANT]
-> The Octopus Agile feature is currently **shadow mode only**. It proposes a
-> schedule but never sends Agile-driven commands to the battery. Existing
-> manual and Smart Overnight controls inherited from upstream can control the
-> battery independently, so leave Smart Overnight Charging **Off** during the
-> initial Agile trial unless you deliberately want to use it.
+> The Agile plan remains shadow-only until you explicitly turn on the
+> **Agile Automated Control** switch. The guarded controller is a beta feature,
+> starts Off after every restart, and never uses fixed Discharge or Feed.
+> Leave Smart Overnight Charging **Off** because the two schedulers are
+> deliberately interlocked.
 
 ## Features
 
@@ -34,7 +34,8 @@ compatible. This fork appears in Home Assistant as **AFERIY PS240 Agile**.
 - Custom AFERIY PS240 icon
 - Bundled AFERIY Overnight Plan dashboard card
 - View-only Octopus Agile Proposed Plans for today and tomorrow
-- Conservative 800 W Agile command limit (0.4 kWh per half-hour)
+- Opt-in guarded Agile Automated Control toggle, off after every restart
+- Confirmed Agile limits: 1200 W AC charging and 1000 W CT-controlled household supply
 - GBP/kWh profitability checks and malformed/stale tariff-data safeguards
 - PV-adjusted net-demand planning based on an anonymized half-hour profile
 - Connection health and last-command result sensors
@@ -170,8 +171,10 @@ missing or unusable, Today safely retains its existing same-day calculation.
 The plan aims for 100% SOC by 16:00, protects expected household demand until
 22:00, and only proposes discharge when the avoided import price exceeds the
 estimated delivered replacement cost by at least £0.03/kWh. Proposed Agile
-commands are conservatively capped at **800 W**; device-managed Self-Gen output
-may differ while its CT follows household demand.
+AC grid charging is capped at **1200 W** (0.6 kWh per half-hour). Peak supply
+uses Self-Gen/Zero Export, whose CT follows household demand, with a **1000 W**
+maximum household output used by the plan (0.5 kWh per half-hour). The Agile
+controller does not send fixed discharge commands.
 
 The fallback Agile profile subtracts historical measured PV from household
 demand. Live forecast values are not yet deducted. The shadow sensor discovers
@@ -232,10 +235,12 @@ title: Octopus Agile Battery Plan
 today_entity: sensor.your_battery_agile_proposed_plan_today
 tomorrow_entity: sensor.your_battery_agile_proposed_plan_tomorrow
 shadow_entity: sensor.your_battery_agile_shadow_operating_state
+control_entity: switch.your_battery_agile_automated_control
 ```
 
 Find the exact entity IDs under **Developer Tools → States** by searching for
-`agile_proposed_plan` or `agile_shadow_operating_state`.
+`agile_proposed_plan`, `agile_shadow_operating_state`, or
+`agile_automated_control`.
 
 ### 4. Add live battery status (optional)
 
@@ -247,6 +252,7 @@ from the AFERIY device, such as:
 - AC Charging Power
 - Battery Discharging Power
 - Grid Import/Export
+- Agile Automated Control (keep Off until you deliberately begin the guarded beta)
 - Connection Status
 
 The separate **AFERIY Overnight Plan** card describes the inherited
@@ -277,7 +283,35 @@ highlimit: 30
 The cost figures cover the planned battery actions and protected-window value;
 they are not a forecast of the household's complete electricity bill. Sensor
 attributes expose the complete validated timetable and an explicit
-`control_enabled: false` marker.
+`control_enabled` marker.
+
+## Guarded Agile Automated Control
+
+The **Agile Automated Control** configuration switch is the explicit opt-in
+for the beta executor. When it is Off, the planner and logger continue in
+shadow mode exactly as before. Turning it On is accepted only when the Octopus
+Agile tariff is selected, the fixed-window Overnight Charge selector is Off,
+the complete battery bank is present, and connection/SOC/rate data are fresh.
+
+The controller:
+
+- requires two separate healthy polls before starting Charge or Idle
+- defers grid Charge while useful live PV is present or target SOC is reached
+- limits AC charge commands to 1200 W and the selected slot/partial-slot duration
+- uses Self-Gen/Zero Export for profitable discharge periods, preserving the
+  battery's CT-controlled household-demand and zero-export loop
+- never invokes fixed Discharge or Feed
+- restores Self-Gen when the plan, rates, connection, reserve, or topology is
+  unsafe, when the toggle is turned Off, or when a manual mode supersedes it
+- persists only an interrupted-command recovery marker; the On state itself is
+  never restored after a restart
+
+The PS240 schedule is recurring rather than date-specific. Commands are
+therefore restricted to the current half-hour and Home Assistant clears them
+on the next safe transition. If Home Assistant is stopped during a custom
+command, its recovery marker restores Self-Gen on the next healthy connection.
+Initially supervise several charge/hold boundaries before leaving this beta
+controller unattended.
 
 ## Export Agile Shadow Plans
 
@@ -310,9 +344,9 @@ Schema-v3 records include `planner_revisions` and
 `demand_profile_revisions`, plus cumulative PV generation, battery charge, and
 battery discharge energy. They also record the active operating mode, last
 local command, commanded direction, connection freshness, overnight scheduler
-state, and the shadow operating decision. This allows Self-Gen/Zero Export
-discharge and manual charging to be separated from the read-only Agile
-recommendation.
+state, the shadow operating decision, and guarded-controller status. This
+allows Self-Gen/Zero Export discharge and manual charging to be separated from
+the Agile recommendation and any commands the guarded controller actually sent.
 
 The active JSONL rotates automatically at 8 MiB. The completed segment is
 preserved beside it as a timestamped `.jsonl.gz` archive and the next sample
@@ -331,17 +365,19 @@ in the AFERIY integration options.
 
 ## First-Day Verification
 
-Before relying on the displayed recommendation, check:
+Before relying on the displayed recommendation or opting into control, check:
 
 - both plan sensors identify the expected MPAN and Agile tariff
 - Tomorrow changes from `Waiting for Rates` after Octopus publishes its prices
-- no proposed period exceeds 800 W or 0.4 kWh
+- no proposed charge period exceeds 1200 W or 0.6 kWh, and no planned
+  household-supply period exceeds 1000 W or 0.5 kWh
 - the plan is ready by 16:00 and covers the 18:00-22:00 household peak
-- the battery itself remains unaffected when the Proposed Plan changes
+- the battery itself remains unaffected while Agile Automated Control is Off
 
-Keep shadow mode running for at least one to two weeks and compare proposed
-periods with actual SOC, import, solar and household demand before considering
-any separately reviewed automatic-control phase.
+Keep shadow mode running long enough to compare proposed periods with actual
+SOC, import, solar, and household demand. When first enabling control, supervise
+several transitions and confirm the switch reports verified commands and a
+successful return to Self-Gen.
 
 ## Troubleshooting Agile Setup
 
@@ -552,7 +588,11 @@ base feed value when returning to Self-Gen.
 
 ## Output Limit Notes
 
-The PS240 has been observed to accept 800 W reliably over local TCP. The integration keeps register `3039` visible in diagnostics so higher output-limit behaviour can be investigated, but it does not write that register during normal commands.
+For Agile operation, AC charging is confirmed at up to 1200 W and CT-controlled
+output to the house is confirmed at up to 1000 W. Agile peak operation remains
+Self-Gen/Zero Export, so the battery follows actual household demand rather than
+receiving a fixed 1000 W discharge command. Other higher-power manual modes and
+output-register behaviour remain experimental.
 
 ## Documentation
 

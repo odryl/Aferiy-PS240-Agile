@@ -1,17 +1,19 @@
 # Octopus Agile implementation
 
-## Current safety stage: shadow planning
+## Current safety stage: guarded opt-in beta
 
 The integration reads BottlecapDave Octopus Energy current-day and next-day
-rate event entities, publishes a Proposed Plan, and exposes a shadow operating
-state for a future supervised controller. It does not send any Agile control
-command to the battery. The `control_enabled` attribute is always `false`.
+rate event entities, publishes a Proposed Plan, and exposes an operating-state
+recommendation. It remains view-only until the user explicitly turns on the
+**Agile Automated Control** switch. That toggle always starts Off after an
+integration or Home Assistant restart.
 
 The planner enforces these invariants:
 
-- 800 W conservative Agile charge/discharge command limit
-- 0.4 kWh maximum discharge in any 30-minute Agile period
-- 800 W conservative grid-charge planning limit
+- 1200 W confirmed AC grid-charge limit (0.6 kWh per 30-minute period)
+- 1000 W maximum CT-controlled household supply used by discharge planning
+  (0.5 kWh per 30-minute period)
+- no fixed discharge command; peak supply always preserves Self-Gen/Zero Export
 - 10% device reserve by default, taken from the live discharge-limit register
 - 100% target before 16:00 by default
 - price-aware protection from 16:00 to 22:00, capped by the anonymized
@@ -41,18 +43,33 @@ not stored in the repository. The twelve retained 16:00-22:00 values are
 anonymized net-demand medians recalibrated from schema-v2 shadow exports. They
 subtract measured PV and remain an advisory demand and value model. When
 Self-Gen/Zero Export is active, its CT
-feedback is the live demand-following and zero-export control; any future Agile
-executor must preserve that loop rather than replace it with a fixed discharge
+feedback is the live demand-following and zero-export control; the Agile
+executor preserves that loop rather than replacing it with a fixed discharge
 command. Manual pre-peak charging is an external action, not proof that the
 shadow plan executed. Schema-v3 exports therefore include operating mode,
 connection freshness, local-command context, and the shadow decision so those
 samples can be classified separately.
 
-The shadow state machine locks upcoming charge/discharge actions before their
+The operating state machine locks upcoming charge/discharge actions before their
 half-hour boundary. It keeps Self-Gen while useful PV is present, permits Idle
 only after PV has remained negligible for 15 minutes and a later selected
 discharge remains, and recommends Self-Gen on stale telemetry, invalid rates,
-or reserve protection. Those are recommendations only.
+or reserve protection. Planned grid charging is also deferred when useful live
+PV is already present or the target SOC has been reached.
+
+When explicitly enabled, the guarded controller requires two distinct healthy
+polls before starting Charge or Idle, caps AC Charge at 1200 W, constrains custom
+commands to the selected half-hour/partial period, and verifies every register
+write. Profitable discharge always selects Self-Gen/Zero Export so the PS240 CT
+loop follows household load; fixed Discharge and Feed are forbidden.
+
+The controller interlocks against the legacy overnight scheduler, non-Agile
+tariffs, incomplete storage topology, stale telemetry, and invalid decisions.
+Turning it off or making a manual mode selection restores Self-Gen. A persisted
+pending-restore marker survives restart without restoring the toggle itself,
+allowing an interrupted custom command to be cleared after the next healthy
+connection. The marker must be successfully persisted before any custom
+command is sent; a storage failure inhibits the command.
 
 ## Data flow
 
@@ -63,9 +80,11 @@ or reserve protection. Those are recommendations only.
    SOC join the two daily views into one rolling horizon.
 5. Cheapest periods before 16:00 are selected to reach the target SOC.
 6. Highest-value periods between 16:00 and 22:00 are selected for household protection.
-7. The shadow sensor converts the plan and live telemetry into a view-only
-   proposed operating state, retaining actions locked before their boundary.
-8. Home Assistant updates the Today/Tomorrow plan sensors and dashboard card.
+7. The operating-state sensor converts the plan and live telemetry into a
+   recommendation, retaining actions locked before their boundary.
+8. If explicitly enabled, the guarded controller applies the recommendation
+   through its interlocks, confirmation debounce, and verified command path.
+9. Home Assistant updates the Today/Tomorrow plan sensors and dashboard card.
 
 ## Solar forecast follow-up
 
@@ -85,20 +104,27 @@ automatically. Multi-meter installations must select the two import event
 entities in the AFERIY integration options. Export rate entities are never
 auto-selected.
 
-## Before control can be enabled
+## Remaining beta validation
 
-Automatic control should remain a later, separately reviewed stage. It needs:
+The initial controller now provides:
 
-- a successful review of the shadow operating-state decisions
 - explicit user opt-in with a prominent off switch
 - stale-rate and stale-SOC interlocks
 - minimum price-spread and round-trip-efficiency checks
 - command acknowledgement and post-command verification
-- hardware-bounded command end times plus restart recovery that returns safely
+- device-slot-bounded command end times plus restart recovery that returns safely
   to Self-Gen/Zero Export
-- per-period demand forecasts learned from Home Assistant Recorder
-- solar forecasts and a user-selectable reserve policy
-- a daily cycle/cost ceiling and a complete audit log
+- a complete controller audit context in schema-v3 exports
 
-No control stage should be merged until the conservative Agile power limit and
-hardware-bounded command end time are asserted immediately before every write.
+The following remain follow-up improvements rather than permission to weaken
+the existing gates:
+
+- provider-neutral timestamped solar forecast ingestion (live PV inhibition is
+  already enforced)
+- per-period Agile demand profiles learned directly from Home Assistant Recorder
+- configurable daily cycle/cost ceilings
+- longer live-command validation across sunny, cloudy, reconnect, midnight,
+  restart, and newly expanded PV-array conditions
+
+The conservative Agile power limit and bounded command window are asserted
+immediately before every automated custom-mode write.

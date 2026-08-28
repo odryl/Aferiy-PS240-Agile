@@ -731,11 +731,15 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 if plan["attributes"].get("demand_profile_revision") is not None
             }
         )
+        control_enabled = any(
+            coordinator.agile_control_enabled
+            for _, coordinator in active_entries
+        )
         record = {
             "schema_version": 3,
             "exported_at": exported_at,
             "label": label,
-            "control_enabled": False,
+            "control_enabled": control_enabled,
             "planner_revisions": planner_revisions,
             "demand_profile_revisions": demand_profile_revisions,
             "plans": plans,
@@ -764,9 +768,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 "telemetry_count": len(telemetry),
                 "file": AGILE_PLAN_EXPORT_FILENAME,
                 **export_result,
-                "control_enabled": False,
+                "control_enabled": control_enabled,
                 "note": (
-                    "Read-only trial export; no battery command was sent. The active file "
+                    "The export service is read-only and sent no battery command. The active file "
                     "is compressed and rotated when it reaches 8 MiB."
                 ),
             },
@@ -964,6 +968,7 @@ def _agile_trial_telemetry(
         "automatic_overnight_charging_status",
     )
     shadow_decision = entity_state(Platform.SENSOR, "agile_shadow_operating_state")
+    agile_control = entity_state(Platform.SWITCH, "agile_automatic_control")
     now_utc = datetime.now(UTC)
     last_successful_update = coordinator.last_successful_update
     connection_age_seconds = (
@@ -1009,6 +1014,18 @@ def _agile_trial_telemetry(
                     },
                 }
                 if shadow_decision is not None
+                else None
+            ),
+            "agile_automatic_control": (
+                {
+                    "state": agile_control.state,
+                    **{
+                        key: value
+                        for key, value in agile_control.attributes.items()
+                        if key not in ("friendly_name", "icon")
+                    },
+                }
+                if agile_control is not None
                 else None
             ),
         },

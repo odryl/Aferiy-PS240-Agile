@@ -10,10 +10,11 @@ from math import isfinite
 from typing import Any
 from zoneinfo import ZoneInfo
 
-_SAFE_SYSTEM_POWER_CEILING_W = 800
+_SAFE_AGILE_CHARGE_POWER_CEILING_W = 1200
+_SAFE_AGILE_DISCHARGE_POWER_CEILING_W = 1000
 _DEFAULT_MINIMUM_SAVING_GBP_PER_KWH = 0.03
 _REQUIRED_SOURCE_ATTRIBUTES = ("mpan", "serial_number", "tariff_code")
-_PLANNER_REVISION = 2
+_PLANNER_REVISION = 3
 _SHADOW_DECISION_REVISION = 1
 
 
@@ -188,8 +189,8 @@ def build_agile_day_plan(
     target_soc: float = 100.0,
     ready_by: str = "16:00",
     protected_until: str = "22:00",
-    max_charge_power_w: int = 800,
-    max_discharge_power_w: int = 800,
+    max_charge_power_w: int = _SAFE_AGILE_CHARGE_POWER_CEILING_W,
+    max_discharge_power_w: int = _SAFE_AGILE_DISCHARGE_POWER_CEILING_W,
     charge_efficiency: float = 0.90,
     discharge_efficiency: float = 0.95,
     minimum_saving_gbp_per_kwh: float = _DEFAULT_MINIMUM_SAVING_GBP_PER_KWH,
@@ -342,8 +343,14 @@ def build_agile_day_plan(
     if requested_charge_power_w <= 0 or requested_discharge_power_w <= 0:
         return _invalid_plan("Charge and discharge power limits must be greater than zero.")
 
-    max_charge_power_w = min(_SAFE_SYSTEM_POWER_CEILING_W, int(requested_charge_power_w))
-    max_discharge_power_w = min(_SAFE_SYSTEM_POWER_CEILING_W, int(requested_discharge_power_w))
+    max_charge_power_w = min(
+        _SAFE_AGILE_CHARGE_POWER_CEILING_W,
+        int(requested_charge_power_w),
+    )
+    max_discharge_power_w = min(
+        _SAFE_AGILE_DISCHARGE_POWER_CEILING_W,
+        int(requested_discharge_power_w),
+    )
     charge_candidates = [
         rate
         for rate in rates
@@ -583,8 +590,9 @@ def build_agile_day_plan(
         "max_system_discharge_power_w": max_discharge_power_w,
         "max_discharge_per_half_hour_kwh": round(discharge_limit_kwh, 3),
         "power_constraint_note": (
-            "800 W is the conservative Agile command limit. Self-Gen/Zero Export may use "
-            "a different device-managed output while its CT follows household demand."
+            "Agile allows up to 1200 W AC grid charging. Peak supply uses Self-Gen/Zero "
+            "Export with a 1000 W household-output planning ceiling; no fixed discharge "
+            "command is sent."
         ),
         "demand_profile_source": (
             "configured_historical_half_hour_profile"
@@ -701,8 +709,36 @@ def build_agile_shadow_decision(
         "planned_slot_end": action.get("end"),
         "planned_slot_energy_kwh": action.get("energy_kwh"),
         "planned_slot_power_limit_w": action.get("command_power_limit_w"),
+        "planned_slot_duration_minutes": action.get("duration_minutes"),
+        "target_soc": plan.get("target_soc"),
     }
 
+    inferred_pv_charge_w = max(0.0, total_charge_power_w - ac_charge_power_w)
+    solar_active = max(0.0, pv_power_w) >= 50 or inferred_pv_charge_w >= 50
+    target_soc = plan.get("target_soc")
+    target_reached = bool(
+        isinstance(target_soc, int | float)
+        and isfinite(float(target_soc))
+        and soc_percent >= float(target_soc) - 0.5
+    )
+
+    if action_name == "charge" and target_reached:
+        return result(
+            "Charge Target Reached",
+            "Self-Gen/Zero Export",
+            "Battery SOC has reached the plan target; grid charging is inhibited.",
+            charge_inhibited_reason="target_reached",
+            **action_attrs,
+        )
+    if action_name == "charge" and solar_active:
+        return result(
+            "Solar Charge Deferred",
+            "Self-Gen/Zero Export",
+            "Useful PV is already charging the site; preserve solar headroom instead of starting grid charge.",
+            charge_inhibited_reason="useful_pv_present",
+            inferred_pv_charge_w=round(inferred_pv_charge_w, 1),
+            **action_attrs,
+        )
     if action_name == "charge":
         return result(
             "Planned Charge",
@@ -725,8 +761,6 @@ def build_agile_shadow_decision(
             **action_attrs,
         )
 
-    inferred_pv_charge_w = max(0.0, total_charge_power_w - ac_charge_power_w)
-    solar_active = max(0.0, pv_power_w) >= 50 or inferred_pv_charge_w >= 50
     if solar_active:
         return result(
             "Solar Self-Gen",
@@ -760,3 +794,107 @@ def build_agile_shadow_decision(
         "No locked Agile action requires a mode change; Self-Gen remains the safe default.",
         **action_attrs,
     )
+
+
+def agile_control_mode_for_state(
+    state: str | None,
+    recommended_mode: str | None,
+) -> str | None:
+    """Return the only automated mode permitted for a validated decision state."""
+    if state == "Planned Charge" and recommended_mode == "Charge":
+        return "Charge"
+    if state == "Post-solar Hold" and recommended_mode == "Idle":
+        return "Idle"
+    if state in {
+        "Solar Self-Gen",
+        "Solar Charge Deferred",
+        "Charge Target Reached",
+        "Peak Self-Gen",
+        "Reserve Protection",
+        "Connection Fail-safe",
+        "Rate Fail-safe",
+    } and recommended_mode == "Self-Gen/Zero Export":
+        return "Self-Gen/Zero Export"
+    return None
+
+
+def bounded_agile_command_window(
+    mode: str,
+    attributes: Mapping[str, Any],
+    now: datetime,
+) -> tuple[datetime, datetime] | None:
+    """Return a safe current-slot window for an automated custom command."""
+    if now.tzinfo is None or mode not in ("Charge", "Idle"):
+        return None
+    if mode == "Charge":
+        try:
+            start = datetime.fromisoformat(str(attributes.get("planned_slot_start")))
+            end = datetime.fromisoformat(str(attributes.get("planned_slot_end")))
+        except (TypeError, ValueError):
+            return None
+        if start.tzinfo is None or end.tzinfo is None:
+            return None
+        try:
+            planned_minutes = float(attributes.get("planned_slot_duration_minutes"))
+        except (TypeError, ValueError):
+            try:
+                energy_kwh = float(attributes.get("planned_slot_energy_kwh"))
+                power_w = float(attributes.get("planned_slot_power_limit_w"))
+                planned_minutes = energy_kwh / (power_w / 1000) * 60
+            except (TypeError, ValueError, ZeroDivisionError):
+                return None
+        if not isfinite(planned_minutes) or not 0 < planned_minutes <= 30:
+            return None
+        end = min(end, start + timedelta(minutes=max(1.0, planned_minutes)))
+    else:
+        start = now.replace(
+            minute=(now.minute // 30) * 30,
+            second=0,
+            microsecond=0,
+        )
+        end = start + timedelta(minutes=30)
+    if end <= now + timedelta(seconds=45):
+        return None
+    if start > now + timedelta(minutes=1):
+        return None
+    if end <= start or end - start > timedelta(minutes=31):
+        return None
+    return start, end
+
+
+def agile_control_command_errors(
+    direction: str,
+    power_w: int,
+    slot_start: str | None,
+    slot_end: str | None,
+) -> list[str]:
+    """Validate the final bounded Agile command immediately before a write."""
+    errors: list[str] = []
+    if direction not in ("Charge", "Idle"):
+        errors.append("Agile control never permits fixed Discharge or Feed")
+    if direction == "Charge" and not 0 < power_w <= _SAFE_AGILE_CHARGE_POWER_CEILING_W:
+        errors.append("Agile charge power exceeds its 1200 W limit")
+    if direction == "Idle" and power_w != 0:
+        errors.append("Agile Idle must use a zero-power command")
+    if not slot_start or not slot_end:
+        errors.append("Agile control commands must have a bounded slot")
+        return errors
+
+    parsed_minutes: list[int] = []
+    for value in (slot_start, slot_end):
+        parts = value.split(":")
+        if (
+            len(parts) != 2
+            or len(parts[0]) != 2
+            or len(parts[1]) != 2
+            or not all(part.isdigit() for part in parts)
+            or not 0 <= int(parts[0]) <= 23
+            or not 0 <= int(parts[1]) <= 59
+        ):
+            errors.append("Agile control slot times must use HH:MM")
+            return errors
+        parsed_minutes.append(int(parts[0]) * 60 + int(parts[1]))
+    duration_minutes = (parsed_minutes[1] - parsed_minutes[0]) % (24 * 60)
+    if not 0 < duration_minutes <= 30:
+        errors.append("Agile control windows must be 1 to 30 minutes")
+    return errors

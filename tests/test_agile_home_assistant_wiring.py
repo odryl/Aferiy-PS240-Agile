@@ -15,6 +15,10 @@ CARD_SOURCE = (
     / "aferiy-agile-plan-card.js"
 ).read_text()
 SELECT_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "select.py").read_text()
+SWITCH_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "switch.py").read_text()
+COORDINATOR_SOURCE = (
+    ROOT / "custom_components" / "aecc_battery" / "coordinator.py"
+).read_text()
 
 
 def test_sensor_applies_behavioral_source_validator_and_stale_guard() -> None:
@@ -93,8 +97,9 @@ def test_agile_plan_export_is_read_only_and_redacts_rate_source_metadata() -> No
     assert '"connection_last_update_success"' in INIT_SOURCE
     assert '"connection_age_seconds"' in INIT_SOURCE
     assert '"agile_shadow_decision"' in INIT_SOURCE
+    assert '"agile_automatic_control"' in INIT_SOURCE
     assert "append_agile_json_line" in INIT_SOURCE
-    assert '"control_enabled": False' in INIT_SOURCE
+    assert '"control_enabled": control_enabled' in INIT_SOURCE
     export_service = INIT_SOURCE.split("async def async_export_agile_plan", 1)[1].split(
         "async def async_restore_original_self_consumption", 1
     )[0]
@@ -106,7 +111,7 @@ def test_card_discovers_entities_and_exposes_energy_costs_and_savings() -> None:
     assert '"_agile_proposed_plan_today"' in CARD_SOURCE
     assert '"_agile_proposed_plan_tomorrow"' in CARD_SOURCE
     assert '"_agile_shadow_operating_state"' in CARD_SOURCE
-    assert "Shadow operating state" in CARD_SOURCE
+    assert "Agile operating state" in CARD_SOURCE
     assert "slot.rate_gbp_per_kwh" in CARD_SOURCE
     assert "slot.energy_kwh" in CARD_SOURCE
     assert "slot.duration_minutes" in CARD_SOURCE
@@ -140,6 +145,30 @@ def test_shadow_state_machine_is_registered_and_remains_view_only() -> None:
     )[0]
     assert "async_write_register" not in shadow_sensor
     assert "async_set_battery_control" not in shadow_sensor
+
+
+def test_agile_control_is_explicit_guarded_and_recoverable() -> None:
+    assert "AeccAgileAutomaticControlSwitch" in SWITCH_SOURCE
+    assert 'self._enabled = False' in SWITCH_SOURCE
+    assert 'self._attr_unique_id = f"{config_entry.entry_id}_agile_automatic_control"' in SWITCH_SOURCE
+    assert "_AGILE_CONFIRM_POLLS = 2" in SWITCH_SOURCE
+    assert "agile_control_mode_for_state(" in SWITCH_SOURCE
+    assert 'operation_prefix="agile_control"' in SWITCH_SOURCE
+    assert "async_set_agile_control_pending_restore(True)" in SWITCH_SOURCE
+    assert '"recovery_marker_failed"' in SWITCH_SOURCE
+    assert "async_restore_self_consumption()" in SWITCH_SOURCE
+    assert "agile_control_pending_restore" in COORDINATOR_SOURCE
+    assert "_async_maybe_restore_abandoned_agile_control" in COORDINATOR_SOURCE
+    assert '"Waiting for Agile restore"' in COORDINATOR_SOURCE
+    assert "payload[REG_CONTROL_TIME2] = SLOT_DISABLED" in COORDINATOR_SOURCE
+    assert "agile_control_command_errors(" in COORDINATOR_SOURCE
+    assert "_async_disable_agile_control" in SELECT_SOURCE
+
+
+def test_agile_card_surfaces_but_does_not_silently_enable_control() -> None:
+    assert '"_agile_automated_control"' in CARD_SOURCE
+    assert "Automated control:" in CARD_SOURCE
+    assert "callService" not in CARD_SOURCE
 
 
 def test_midnight_rate_entity_rollover_is_a_waiting_state() -> None:

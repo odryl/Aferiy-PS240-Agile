@@ -42,10 +42,11 @@ DEFAULT_AGILE_PLANNER_ENABLED = True
 DEFAULT_AGILE_READY_BY = "16:00"
 DEFAULT_AGILE_PROTECTED_UNTIL = "22:00"
 
-# The PS240 system-level discharge ceiling confirmed for Agile planning. This
-# is deliberately independent of experimental per-register controls elsewhere.
-AGILE_MAX_SYSTEM_DISCHARGE_POWER_W = 800
-AGILE_MAX_SYSTEM_CHARGE_POWER_W = 800
+# Confirmed system-level limits used by Agile planning. AC grid charging and
+# CT-controlled household supply have different ceilings; neither value changes
+# the experimental per-register controls exposed elsewhere in the integration.
+AGILE_MAX_SYSTEM_CHARGE_POWER_W = 1200
+AGILE_MAX_SYSTEM_DISCHARGE_POWER_W = 1000
 AGILE_DEMAND_PROFILE_REVISION = "shadow_2026_08_net_median_v3"
 
 # Anonymized half-hour net-demand medians from 12 complete schema-v2 shadow

@@ -988,7 +988,7 @@ class AeccAgileShadowOperatingStateSensor(
     CoordinatorEntity[AeccBatteryCoordinator],
     SensorEntity,
 ):
-    """Shadow-only state machine for a future supervised Agile controller."""
+    """Advisory state machine consumed by the opt-in guarded controller."""
 
     _attr_has_entity_name = True
     _attr_name = "Agile Shadow Operating State"
@@ -1163,6 +1163,7 @@ class AeccAgileShadowOperatingStateSensor(
         forecast_entries = self._solar_forecast_config_entries()
         decision.update(
             {
+                "control_enabled": self.coordinator.agile_control_enabled,
                 "connection_last_successful_update": (
                     self.coordinator.last_successful_update.isoformat()
                     if self.coordinator.last_successful_update is not None
@@ -1180,8 +1181,9 @@ class AeccAgileShadowOperatingStateSensor(
                 "additional_pv_power_w": round(max(0.0, additional_pv_power_w), 1),
                 "locked_action_count": len(self._locked_actions),
                 "note": (
-                    "Shadow recommendation only. No battery command is sent; any future "
-                    "executor must use bounded commands and restore Self-Gen on failure."
+                    "This sensor calculates the recommendation. The separate opt-in Agile "
+                    "Automated Control switch may execute only guarded, bounded commands "
+                    "and restores Self-Gen on failure."
                 ),
             }
         )

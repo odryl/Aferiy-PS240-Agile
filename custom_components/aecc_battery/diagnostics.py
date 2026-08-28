@@ -169,6 +169,8 @@ async def async_get_config_entry_diagnostics(
         "last_failure_reason": coordinator.last_failure_reason,
         "commanded_power": coordinator.commanded_power,
         "commanded_direction": coordinator.commanded_direction,
+        "agile_control_enabled": coordinator.agile_control_enabled,
+        "agile_control_pending_restore": coordinator.agile_control_pending_restore,
         "commanded_min_soc": coordinator._commanded_min_soc,
         "commanded_max_soc": coordinator._commanded_max_soc,
         "initial_min_soc": coordinator.initial_min_soc,

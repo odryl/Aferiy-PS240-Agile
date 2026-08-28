@@ -31,10 +31,21 @@ class AferiyAgilePlanCard extends HTMLElement {
     );
   }
 
+  _findSwitch(configured, entitySuffix, friendlyName) {
+    if (configured && this._hass.states[configured]) return this._hass.states[configured];
+    return Object.values(this._hass.states).find(
+      (state) => state.entity_id.startsWith("switch.") && (
+        state.entity_id.endsWith(entitySuffix)
+        || state.attributes?.friendly_name?.endsWith(friendlyName)
+      ),
+    );
+  }
+
   _renderIfNeeded(force = false) {
     const today = this._find(this.config.today_entity, "_agile_proposed_plan_today", "Agile Proposed Plan Today");
     const tomorrow = this._find(this.config.tomorrow_entity, "_agile_proposed_plan_tomorrow", "Agile Proposed Plan Tomorrow");
     const shadow = this._find(this.config.shadow_entity, "_agile_shadow_operating_state", "Agile Shadow Operating State");
+    const control = this._findSwitch(this.config.control_entity, "_agile_automated_control", "Agile Automated Control");
     const signature = JSON.stringify([
       today?.entity_id,
       today?.state,
@@ -47,10 +58,15 @@ class AferiyAgilePlanCard extends HTMLElement {
       shadow?.attributes?.recommended_operating_mode,
       shadow?.attributes?.reason,
       shadow?.attributes?.planned_slot_start,
+      control?.entity_id,
+      control?.state,
+      control?.attributes?.status,
+      control?.attributes?.reason,
+      control?.attributes?.active_mode,
     ]);
     if (!force && signature === this._renderSignature) return;
     this._renderSignature = signature;
-    this.render(today, tomorrow, shadow);
+    this.render(today, tomorrow, shadow, control);
   }
 
   _timelineStorageKey() {
@@ -208,7 +224,8 @@ class AferiyAgilePlanCard extends HTMLElement {
         <span>Discharged-energy replacement ${this._money(attrs.estimated_discharge_replacement_cost_gbp)} at ${this._rate(attrs.delivered_replacement_cost_gbp_per_kwh)}/kWh</span>
         <span>Replacement prices: ${this._escape(attrs.replacement_rate_source === "next_day_published_rates" ? "published tomorrow" : "same day")}</span>
         <span>Reserve ${this._number(attrs.reserve_soc, "%", 0)}</span>
-        <span>Agile command limit ${this._number(attrs.max_system_discharge_power_w, " W", 0)}</span>
+        <span>AC charge limit ${this._number(attrs.max_system_charge_power_w, " W", 0)}</span>
+        <span>Self-Gen house output ${this._number(attrs.max_system_discharge_power_w, " W", 0)}</span>
       </div>
       <h4>Charge and discharge schedule</h4>
       ${this._activeRows(slots)}
@@ -217,7 +234,7 @@ class AferiyAgilePlanCard extends HTMLElement {
     </section>`;
   }
 
-  render(today, tomorrow, shadow) {
+  render(today, tomorrow, shadow, control) {
     if (!this._hass) return;
     this._loadOpenTimelines();
     this.querySelectorAll("details[data-timeline]").forEach((details) => {
@@ -261,8 +278,9 @@ class AferiyAgilePlanCard extends HTMLElement {
         @media (max-width: 700px) { .metrics { grid-template-columns: repeat(2, minmax(110px, 1fr)); } .rates { grid-template-columns: repeat(4, minmax(54px, 1fr)); } }
       </style>
       <h2>${this._escape(this.config.title || "Octopus Agile Battery Plan")}</h2>
-      <p class="subtitle">Today and tomorrow · view-only shadow plan · no automatic battery commands</p>
-      ${shadow ? `<div class="shadow-state"><strong>Shadow operating state: ${this._escape(shadow.state)}</strong><span>Would use ${this._escape(shadow.attributes?.recommended_operating_mode || "Self-Gen/Zero Export")} · ${this._escape(shadow.attributes?.reason || "Waiting for a decision")}</span></div>` : ""}
+      <p class="subtitle">Today and tomorrow · guarded Agile planning${control?.state === "on" ? " · automated control enabled" : " · shadow-only while control is off"}</p>
+      ${control ? `<div class="shadow-state"><strong>Automated control: ${this._escape(control.state)} · ${this._escape(control.attributes?.status || "Waiting")}</strong><span>${this._escape(control.attributes?.active_mode || "Self-Gen/Zero Export")} · ${this._escape(control.attributes?.reason || "Use the Agile Automated Control entity to opt in")}</span></div>` : ""}
+      ${shadow ? `<div class="shadow-state"><strong>Agile operating state: ${this._escape(shadow.state)}</strong><span>${control?.state === "on" ? "Using" : "Would use"} ${this._escape(shadow.attributes?.recommended_operating_mode || "Self-Gen/Zero Export")} · ${this._escape(shadow.attributes?.reason || "Waiting for a decision")}</span></div>` : ""}
       ${this._day(today, "Today")}
       ${this._day(tomorrow, "Tomorrow")}
     </ha-card>`;
@@ -282,5 +300,5 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "aferiy-agile-plan-card",
   name: "AFERIY Agile Battery Plan",
-  description: "View today's and tomorrow's Octopus Agile charge, discharge and cost plan.",
+  description: "View Octopus Agile plans and guarded automated-control status.",
 });

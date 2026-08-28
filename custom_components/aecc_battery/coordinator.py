@@ -16,6 +16,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from .agile import agile_control_command_errors
 from .cleaners import CLEANERS, CleanerContext
 from .const import (
     DEFAULT_BATTERY_CAPACITY_KWH,
@@ -43,6 +44,7 @@ from .const import (
     REG_BASE_DISCHARGE_ENABLE,
     REG_BASE_DISCHARGE_POWER,
     REG_CONTROL_TIME1,
+    REG_CONTROL_TIME2,
     REG_CUSTOM_MODE,
     REG_EMS_ENABLE,
     REG_MAX_FEED_POWER,
@@ -61,6 +63,7 @@ _SELF_GEN_RECONNECT_QUEUE_TTL = timedelta(minutes=60)
 _OVERNIGHT_ROLLING_RECHECK_MIN_INCREASE_SOC = 2
 _DUPLICATE_WRITE_SUPPRESS_SECONDS = 10
 _DUPLICATE_WRITE_PREFIXES = (
+    "agile_control(",
     "battery_control(",
     "feed_power(",
     "max_soc(",
@@ -185,6 +188,13 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.self_gen_reconnect_queue_enabled: bool = False
         self._pending_self_gen_reconnect: dict[str, str] | None = None
         self.auto_datalogger_restart_enabled: bool = False
+        # Agile automation is deliberately never restored as enabled after an
+        # integration or Home Assistant restart.  The pending-restore marker
+        # is persisted separately so an interrupted custom command is returned
+        # to Self-Gen after the next healthy connection.
+        self.agile_control_enabled: bool = False
+        self.agile_control_pending_restore: bool = False
+        self.agile_controller: Any | None = None
         self.next_datalogger_restart_at: datetime | None = None
         self.last_datalogger_restart_at: datetime | None = None
         self.last_datalogger_restart_reason: str | None = None
@@ -426,6 +436,7 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_good_data = raw
         await self._async_maybe_refresh_device_management()
         await self._async_maybe_apply_pending_self_gen_reconnect()
+        await self._async_maybe_restore_abandoned_agile_control()
         self._schedule_overnight_evaluation()
         return raw
 
@@ -522,6 +533,9 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.auto_datalogger_restart_enabled = bool(
             data.get("auto_datalogger_restart_enabled", False)
         )
+        self.agile_control_pending_restore = bool(
+            data.get("agile_control_pending_restore", False)
+        )
         pending = data.get("pending_self_gen_reconnect")
         if isinstance(pending, dict) and self._pending_self_gen_reconnect_is_valid(pending):
             self._pending_self_gen_reconnect = {
@@ -531,10 +545,10 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.overnight_charging_mode == OVERNIGHT_CHARGE_MODE_DISABLED:
             self._set_overnight_off_status()
 
-    async def async_save_runtime_preferences(self, **updates: Any) -> None:
+    async def async_save_runtime_preferences(self, **updates: Any) -> bool:
         """Persist user SMART/config selections without reloading the integration."""
         if self._runtime_store is None:
-            return
+            return False
         data = {
             "battery_capacity_kwh": round(float(self.battery_capacity_kwh), 3),
             "smart_overnight_buffer_soc": round(float(self.smart_overnight_buffer_soc), 1),
@@ -558,13 +572,18 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "auto_datalogger_restart_enabled": bool(
                 self.auto_datalogger_restart_enabled
             ),
+            "agile_control_pending_restore": bool(
+                self.agile_control_pending_restore
+            ),
             "pending_self_gen_reconnect": self._pending_self_gen_reconnect,
         }
         data.update(updates)
         try:
             await self._runtime_store.async_save(data)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             _LOGGER.warning("Could not save AECC runtime config: %s", exc)
+            return False
+        return True
 
     def _sync_auto_datalogger_restart_task(self) -> None:
         """Start or cancel the fixed three-hour restart loop."""
@@ -630,6 +649,9 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_shutdown(self) -> None:
         """Cancel integration-owned background work before unloading."""
+        controller = self.agile_controller
+        if controller is not None:
+            await controller.async_shutdown()
         tasks = [
             task
             for task in (self._auto_datalogger_restart_task, self._overnight_task)
@@ -641,6 +663,43 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await asyncio.gather(*tasks, return_exceptions=True)
         self._auto_datalogger_restart_task = None
         self._overnight_task = None
+
+    async def async_set_agile_control_pending_restore(self, pending: bool) -> bool:
+        """Persist whether Agile automation owns a custom-mode command."""
+        pending = bool(pending)
+        if self.agile_control_pending_restore == pending:
+            return True
+        previous = self.agile_control_pending_restore
+        self.agile_control_pending_restore = pending
+        saved = await self.async_save_runtime_preferences()
+        if not saved and pending:
+            self.agile_control_pending_restore = previous
+            return False
+        return saved
+
+    async def _async_maybe_restore_abandoned_agile_control(self) -> None:
+        """Recover an Agile command left active across a restart or unload."""
+        if not self.agile_control_pending_restore or self.agile_control_enabled:
+            return
+        if self._storage_topology_stable_polls < 2:
+            return
+        _LOGGER.warning(
+            "Restoring Self-Gen/Zero Export after an interrupted Agile control session"
+        )
+        try:
+            restored = await self.async_restore_self_consumption()
+        except Exception:
+            _LOGGER.exception(
+                "Interrupted Agile control restore failed unexpectedly; retrying after the next healthy poll"
+            )
+            return
+        if not restored:
+            _LOGGER.warning(
+                "Interrupted Agile control restore was not acknowledged; retrying after the next healthy poll"
+            )
+            return
+        self.agile_control_pending_restore = False
+        await self.async_save_runtime_preferences()
 
     @staticmethod
     def _pending_self_gen_reconnect_is_valid(pending: dict[str, Any]) -> bool:
@@ -1394,12 +1453,25 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         current_soc = self._safe_float(self.get_value("average_battery_soc"))
         self._track_morning_accuracy(now)
         self._record_overnight_accuracy_if_due(now, window)
+        if self.agile_control_pending_restore and not self.agile_control_enabled:
+            self._set_overnight_status(
+                "Waiting for Agile restore",
+                "An interrupted Agile custom command must be restored to Self-Gen before another scheduler can start.",
+                {
+                    "mode": mode,
+                    "tariff_preset": self.smart_tariff_preset,
+                    "pending_agile_self_gen_restore": True,
+                },
+            )
+            return
         if self.smart_tariff_preset == OCTOPUS_AGILE_TARIFF_PRESET:
             agile_attrs = {
                 "mode": mode,
                 "tariff_preset": self.smart_tariff_preset,
                 "dynamic_rates": True,
-                "planner_mode": "view_only",
+                "planner_mode": (
+                    "guarded_control" if self.agile_control_enabled else "shadow"
+                ),
             }
             self._reset_overnight_charge_confirmation()
             if self._overnight_scheduler_started_charge:
@@ -1413,7 +1485,7 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._clear_overnight_locked_target()
             self._set_overnight_status(
                 "Agile planner only",
-                "The Agile Proposed Plan uses dynamic rates in view-only mode; no fixed-window charge command will be sent.",
+                "The Agile Proposed Plan uses dynamic rates; the separate guarded Agile control switch owns any opt-in commands.",
                 agile_attrs,
             )
             return
@@ -2658,6 +2730,9 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         power_w: int,
         *,
         charge_soc: int | None = None,
+        slot_start: str | None = None,
+        slot_end: str | None = None,
+        operation_prefix: str = "battery_control",
     ) -> bool:
         has_storage = bool(self.data and self.data.get("Storage_list"))
         field7 = 5 if has_storage else 4
@@ -2666,11 +2741,42 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         charge_soc = int(max(self._commanded_min_soc, min(charge_soc, 100)))
         discharge_soc = self._commanded_min_soc
 
-        if direction == "Idle" or power_w == 0:
+        bounded_slot = slot_start is not None or slot_end is not None
+        if bounded_slot:
+            if not slot_start or not slot_end:
+                raise ValueError("Bounded battery control requires both slot_start and slot_end")
+            for value in (slot_start, slot_end):
+                parts = value.split(":")
+                if (
+                    len(parts) != 2
+                    or len(parts[0]) != 2
+                    or len(parts[1]) != 2
+                    or not all(part.isdigit() for part in parts)
+                    or not 0 <= int(parts[0]) <= 23
+                    or not 0 <= int(parts[1]) <= 59
+                ):
+                    raise ValueError("Battery control slot times must use HH:MM")
+
+        if operation_prefix == "agile_control":
+            command_errors = agile_control_command_errors(
+                direction,
+                power_w,
+                slot_start,
+                slot_end,
+            )
+            if command_errors:
+                raise ValueError(" ".join(command_errors))
+
+        if (direction == "Idle" or power_w == 0) and not bounded_slot:
             slot1 = f"0,00:00,00:00,0,0,0,0,0,0,{charge_soc},{discharge_soc}"
         else:
             reg_power = -power_w if direction == "Charge" else power_w
-            slot1 = f"1,00:00,23:59,{reg_power},0,6,{field7},0,0,{charge_soc},{discharge_soc}"
+            start_hhmm = slot_start or "00:00"
+            end_hhmm = slot_end or "23:59"
+            slot1 = (
+                f"1,{start_hhmm},{end_hhmm},{reg_power},0,6,{field7},0,0,"
+                f"{charge_soc},{discharge_soc}"
+            )
 
         payload = {
             REG_EMS_ENABLE: "1",
@@ -2680,14 +2786,17 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             REG_CUSTOM_MODE: "1",
             REG_CONTROL_TIME1: slot1,
         }
+        if bounded_slot:
+            payload[REG_CONTROL_TIME2] = SLOT_DISABLED
 
         if self.extended_power:
             payload[REG_MAX_FEED_POWER] = str(MAX_BATTERY_POWER_W)
 
         if power_w > MAX_REGISTER_POWER_DEFAULT and not self.extended_power:
             _LOGGER.warning(
-                "Power %d W exceeds default 800 W limit. "
-                "Enable 'Extended power range' in integration options to allow up to %d W.",
+                "Power %d W exceeds the legacy 800 W default. "
+                "The confirmed Agile AC-charge ceiling is %d W; other high-power modes "
+                "remain experimental.",
                 power_w,
                 MAX_BATTERY_POWER_W,
             )
@@ -2699,11 +2808,16 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             slot1,
         )
 
-        success = await self._logged_write(payload, f"battery_control({direction}, {power_w}W)")
+        operation = f"{operation_prefix}({direction}, {power_w}W"
+        if bounded_slot:
+            operation += f", {slot_start}-{slot_end}"
+        operation += ")"
+        success = await self._logged_write(payload, operation)
         if success:
             self._commanded_work_mode = MODE_CUSTOM
             self._commanded_direction = direction
             self._commanded_power = power_w
+            self.commanded_operating_mode = direction
             if direction == "Charge" and power_w > 0:
                 self.commanded_charge_power = power_w
             elif direction == "Discharge" and power_w > 0:

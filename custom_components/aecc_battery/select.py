@@ -86,6 +86,16 @@ SOLAR_UNAVAILABLE = "Solar Unavailable"
 SOLAR_AVAILABILITY_OPTIONS = [SOLAR_AVAILABLE, SOLAR_UNAVAILABLE]
 
 
+async def _async_disable_agile_control(
+    coordinator: AeccBatteryCoordinator,
+    reason: str,
+) -> None:
+    """Ensure explicit manual/scheduler intent supersedes Agile automation."""
+    controller = getattr(coordinator, "agile_controller", None)
+    if controller is not None and getattr(controller, "is_on", False):
+        await controller.async_disable(reason)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -196,6 +206,11 @@ class AeccOperatingModeSelect(CoordinatorEntity[AeccBatteryCoordinator], SelectE
 
     async def async_select_option(self, option: str) -> None:
         _LOGGER.info("User selected operating mode: %s", option)
+
+        await _async_disable_agile_control(
+            self.coordinator,
+            f"manual Operating Mode selection: {option}",
+        )
 
         # Any new manual intent supersedes a delayed restore, including a
         # repeated Self-Gen request that will replace it if delivery fails.
@@ -501,6 +516,11 @@ class AeccAutomaticOvernightChargingSelect(
             return
 
         mode = OVERNIGHT_CHARGE_MODE_FROM_LABEL[option]
+        if mode != OVERNIGHT_CHARGE_MODE_DISABLED:
+            await _async_disable_agile_control(
+                self.coordinator,
+                f"fixed-window Overnight Charge selected: {option}",
+            )
         self._selected_mode = mode
         self.coordinator.set_overnight_charging_mode(mode)
         await self.coordinator.async_save_runtime_preferences(overnight_charging_mode=mode)
@@ -586,10 +606,15 @@ class AeccSmartTariffPresetSelect(
                 "preset": preset,
                 "preset_label": TARIFF_PRESET_LABELS.get(preset),
                 "dynamic_rates": True,
-                "planner_mode": "view_only",
+                "planner_mode": (
+                    "guarded_control"
+                    if self.coordinator.agile_control_enabled
+                    else "shadow"
+                ),
                 "note": (
                     "The Agile Proposed Plan uses Octopus half-hourly rate events. "
-                    "Fixed-window Smart Overnight Charging is disabled."
+                    "The separate guarded control switch is opt-in and the fixed-window "
+                    "Smart Overnight scheduler is disabled."
                 ),
             }
         start, end = self._window_for_preset(preset)
@@ -612,6 +637,11 @@ class AeccSmartTariffPresetSelect(
             return
 
         preset = TARIFF_PRESET_FROM_LABEL[option]
+        if preset != OCTOPUS_AGILE_TARIFF_PRESET:
+            await _async_disable_agile_control(
+                self.coordinator,
+                f"tariff changed away from Octopus Agile: {option}",
+            )
         start, end = self._window_for_preset(preset)
         self._selected_preset = preset
         self.coordinator.set_smart_tariff_preset(preset)

@@ -56,16 +56,30 @@ def _plan(day: str = "2026-07-27", **overrides: object) -> dict[str, object]:
     return AGILE.build_agile_day_plan(_rates(day), **values)
 
 
-def test_discharge_plan_command_is_capped_at_800w() -> None:
-    plan = _plan(max_discharge_power_w=1200)
+def test_discharge_plan_is_capped_at_confirmed_1000w_house_output() -> None:
+    plan = _plan(max_discharge_power_w=1500)
 
     discharge_slots = [slot for slot in plan["slots"] if slot["action"] == "discharge"]
-    assert plan["max_system_discharge_power_w"] == 800
-    assert plan["max_discharge_per_half_hour_kwh"] == 0.4
+    assert plan["max_system_discharge_power_w"] == 1000
+    assert plan["max_discharge_per_half_hour_kwh"] == 0.5
     assert discharge_slots
-    assert all(slot["power_w"] == 800 for slot in discharge_slots)
-    assert all(slot["energy_kwh"] <= 0.4 for slot in discharge_slots)
+    assert any(slot["power_w"] == 1000 for slot in discharge_slots)
+    assert all(slot["power_w"] <= 1000 for slot in discharge_slots)
+    assert all(slot["command_power_limit_w"] == 1000 for slot in discharge_slots)
+    assert all(slot["energy_kwh"] <= 0.5 for slot in discharge_slots)
     assert plan["planned_discharge_kwh"] <= 5.874 * 0.9 * 0.95
+
+
+def test_charge_plan_is_capped_at_confirmed_1200w_ac_limit() -> None:
+    plan = _plan(max_charge_power_w=1500)
+
+    charge_slots = [slot for slot in plan["slots"] if slot["action"] == "charge"]
+    assert plan["max_system_charge_power_w"] == 1200
+    assert charge_slots
+    assert any(slot["power_w"] == 1200 for slot in charge_slots)
+    assert all(slot["power_w"] <= 1200 for slot in charge_slots)
+    assert all(slot["command_power_limit_w"] == 1200 for slot in charge_slots)
+    assert all(slot["energy_kwh"] <= 0.6 for slot in charge_slots)
 
 
 def test_plan_charges_before_1600_and_uses_household_profile() -> None:
@@ -179,7 +193,7 @@ def test_starting_below_reserve_is_recoverable_and_not_invalid() -> None:
     assert plan["starting_below_reserve"] is True
     assert plan["reserve_recovery_stored_kwh"] == 0.078
     assert plan["planned_grid_charge_kwh"] > 0
-    assert plan["planner_revision"] == 2
+    assert plan["planner_revision"] == 3
     assert plan["demand_profile_revision"] == "shadow_2026_08_net_median_v3"
 
 
@@ -225,7 +239,7 @@ def test_shadow_decision_preserves_solar_and_uses_locked_actions() -> None:
         "decision_source": "pre_boundary_lock",
     }
 
-    charge = AGILE.build_agile_shadow_decision(
+    solar_charge = AGILE.build_agile_shadow_decision(
         plan,
         now=now,
         connection_fresh=True,
@@ -249,6 +263,22 @@ def test_shadow_decision_preserves_solar_and_uses_locked_actions() -> None:
         pv_quiet_minutes=0,
     )
 
+    charge = AGILE.build_agile_shadow_decision(
+        plan,
+        now=now,
+        connection_fresh=True,
+        soc_percent=40,
+        reserve_soc=15,
+        pv_power_w=0,
+        total_charge_power_w=0,
+        ac_charge_power_w=0,
+        pv_quiet_minutes=20,
+        locked_action=locked_charge,
+    )
+
+    assert solar_charge["state"] == "Solar Charge Deferred"
+    assert solar_charge["recommended_operating_mode"] == "Self-Gen/Zero Export"
+    assert solar_charge["charge_inhibited_reason"] == "useful_pv_present"
     assert charge["state"] == "Planned Charge"
     assert charge["recommended_operating_mode"] == "Charge"
     assert charge["planned_action_source"] == "pre_boundary_lock"
@@ -297,6 +327,28 @@ def test_shadow_decision_holds_only_after_solar_is_quiet() -> None:
     assert not_quiet["recommended_operating_mode"] == "Self-Gen/Zero Export"
 
 
+def test_shadow_decision_never_charges_at_or_above_target() -> None:
+    now = datetime(2026, 8, 24, 2, 0, tzinfo=ZoneInfo("Europe/London"))
+    plan = {"status": "proposed", "target_soc": 80, "slots": []}
+
+    decision = AGILE.build_agile_shadow_decision(
+        plan,
+        now=now,
+        connection_fresh=True,
+        soc_percent=80,
+        reserve_soc=15,
+        pv_power_w=0,
+        total_charge_power_w=0,
+        ac_charge_power_w=0,
+        pv_quiet_minutes=30,
+        locked_action={"action": "charge"},
+    )
+
+    assert decision["state"] == "Charge Target Reached"
+    assert decision["recommended_operating_mode"] == "Self-Gen/Zero Export"
+    assert decision["charge_inhibited_reason"] == "target_reached"
+
+
 def test_shadow_decision_fails_safe_for_stale_connection_or_reserve() -> None:
     now = datetime(2026, 8, 24, 19, 0, tzinfo=ZoneInfo("Europe/London"))
     plan = {"status": "proposed", "slots": []}
@@ -328,6 +380,66 @@ def test_shadow_decision_fails_safe_for_stale_connection_or_reserve() -> None:
     assert stale["recommended_operating_mode"] == "Self-Gen/Zero Export"
     assert reserve["state"] == "Reserve Protection"
     assert reserve["recommended_operating_mode"] == "Self-Gen/Zero Export"
+
+
+def test_control_mode_mapping_rejects_mismatched_or_unknown_decisions() -> None:
+    assert AGILE.agile_control_mode_for_state("Planned Charge", "Charge") == "Charge"
+    assert AGILE.agile_control_mode_for_state("Post-solar Hold", "Idle") == "Idle"
+    assert (
+        AGILE.agile_control_mode_for_state("Peak Self-Gen", "Self-Gen/Zero Export")
+        == "Self-Gen/Zero Export"
+    )
+    assert AGILE.agile_control_mode_for_state("Planned Charge", "Discharge") is None
+    assert AGILE.agile_control_mode_for_state("Unexpected", "Charge") is None
+    assert AGILE.agile_control_mode_for_state("Unexpected", "Feed") is None
+
+
+def test_automated_charge_window_honours_partial_slot_and_rejects_bad_windows() -> None:
+    now = datetime(2026, 8, 24, 13, 0, 10, tzinfo=ZoneInfo("Europe/London"))
+    attributes = {
+        "planned_slot_start": "2026-08-24T13:00:00+01:00",
+        "planned_slot_end": "2026-08-24T13:30:00+01:00",
+        "planned_slot_duration_minutes": 15,
+    }
+
+    window = AGILE.bounded_agile_command_window("Charge", attributes, now)
+
+    assert window is not None
+    assert window[0].isoformat() == "2026-08-24T13:00:00+01:00"
+    assert window[1].isoformat() == "2026-08-24T13:15:00+01:00"
+    assert AGILE.bounded_agile_command_window(
+        "Charge",
+        {**attributes, "planned_slot_start": "2026-08-24T13:30:00+01:00"},
+        now,
+    ) is None
+    assert AGILE.bounded_agile_command_window(
+        "Charge",
+        {**attributes, "planned_slot_duration_minutes": 31},
+        now,
+    ) is None
+    assert AGILE.bounded_agile_command_window("Feed", attributes, now) is None
+
+
+def test_automated_idle_window_is_limited_to_current_half_hour() -> None:
+    now = datetime(2026, 8, 24, 18, 17, tzinfo=ZoneInfo("Europe/London"))
+
+    window = AGILE.bounded_agile_command_window("Idle", {}, now)
+
+    assert window is not None
+    assert window[0].isoformat() == "2026-08-24T18:00:00+01:00"
+    assert window[1].isoformat() == "2026-08-24T18:30:00+01:00"
+
+
+def test_final_automated_command_guard_rejects_unsafe_writes() -> None:
+    assert AGILE.agile_control_command_errors("Charge", 1200, "23:30", "00:00") == []
+    assert AGILE.agile_control_command_errors("Idle", 0, "18:00", "18:30") == []
+    assert AGILE.agile_control_command_errors("Discharge", 800, "18:00", "18:30")
+    assert AGILE.agile_control_command_errors("Feed", 100, "18:00", "18:30")
+    assert AGILE.agile_control_command_errors("Charge", 1201, "18:00", "18:30")
+    assert AGILE.agile_control_command_errors("Idle", 1, "18:00", "18:30")
+    assert AGILE.agile_control_command_errors("Charge", 800, None, None)
+    assert AGILE.agile_control_command_errors("Charge", 800, "18:00", "18:31")
+    assert AGILE.agile_control_command_errors("Charge", 800, "bad", "18:30")
 
 
 def test_rates_are_gbp_and_savings_are_not_divided_by_100() -> None:
@@ -548,13 +660,13 @@ def test_partial_slots_report_energy_average_power_limit_and_duration() -> None:
     charge = next(slot for slot in plan["slots"] if slot["action"] == "charge")
     discharge = next(slot for slot in plan["slots"] if slot["action"] == "discharge")
 
-    assert charge["energy_kwh"] < 0.4
-    assert charge["power_w"] < 800
-    assert charge["command_power_limit_w"] == 800
+    assert charge["energy_kwh"] < 0.6
+    assert charge["power_w"] < 1200
+    assert charge["command_power_limit_w"] == 1200
     assert charge["duration_minutes"] < 30
     assert discharge["energy_kwh"] == 0.055
     assert discharge["power_w"] == 110
-    assert discharge["command_power_limit_w"] == 800
+    assert discharge["command_power_limit_w"] == 1000
     assert discharge["duration_minutes"] == 30
 
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.8.16
+
+- Add an opt-in **Agile Automated Control** switch for a guarded beta control
+  stage. It starts Off after every integration/Home Assistant restart and only
+  executes Charge, bounded Idle, or CT-controlled Self-Gen decisions; it never
+  sends fixed Discharge or Feed commands.
+- Require two fresh telemetry polls before custom commands, interlock against
+  the fixed-window overnight scheduler and non-Agile tariffs, verify writes,
+  and persist a recovery marker so an interrupted custom command is restored
+  to Self-Gen after reconnect.
+- Defer planned grid charging while useful live PV is present or the target SOC
+  has already been reached. Record the controller state and audit context in
+  schema-v3 exports and show it on the Agile plan card.
+- Model the confirmed asymmetric system limits: up to 1200 W for AC charging
+  and up to 1000 W of CT-controlled Self-Gen supply to household demand. Bump
+  the planner revision so new exports can be separated from earlier 800 W plans.
+
 ## 1.8.15
 
 - Add a view-only Agile Shadow Operating State sensor that locks upcoming
