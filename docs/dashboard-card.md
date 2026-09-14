@@ -9,7 +9,7 @@ Post-Sunset Need, useful solar, confidence, and SMART History completeness.
 After installing or updating the integration and restarting Home Assistant, add this dashboard resource:
 
 ```text
-/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.20
+/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.21
 ```
 
 Set the resource type to:
@@ -49,7 +49,7 @@ The card reads the calculation from the Recommended Overnight SOC sensor. It doe
 The separate guarded recovery card is available at:
 
 ```text
-/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.20
+/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.21
 ```
 
 After registering it as a JavaScript module, add **AFERIY Wi-Fi Loss Recovery**

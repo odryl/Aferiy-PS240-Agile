@@ -66,14 +66,14 @@
         "data_description": {
           "advanced_energy_sensors": "Adds optional estimate sensors that can use solar forecast, tariff, occupancy, and household demand data. Leave disabled for the clean core battery integration.",
           "poll_interval": "How often to poll the battery locally, in seconds. Lower values update faster but create more traffic.",
-          "tariff_preset": "Defaults to Octopus Agile. Agile and Cosy can use the current/next-day rate events above. Agile disables fixed-window Smart Overnight Charging; Cosy retains its separate morning-window scheduler.",
+          "tariff_preset": "Defaults to Octopus Agile. Agile and Cosy use the current/next-day rate events above. Both disable fixed-window Smart Overnight Charging so it cannot conflict with guarded rate-plan control.",
           "off_peak_start": "Start of a custom fixed-rate charging window in 24-hour HH:MM format. Used only with the Custom tariff preset.",
           "off_peak_end": "End of a custom fixed-rate charging window in 24-hour HH:MM format. Used only with the Custom tariff preset.",
-          "agile_planner_enabled": "Creates view-only daily charge/discharge plans from Octopus Agile or Cosy rates. It does not send battery commands.",
+          "agile_planner_enabled": "Creates daily plans from Octopus Agile or Cosy rates. Plans remain view-only unless you explicitly enable the guarded Agile Automated Control switch.",
           "agile_current_day_rates_entity": "BottlecapDave Octopus Energy current-day import rates event. Leave empty for safe automatic discovery when there is exactly one import meter.",
           "agile_next_day_rates_entity": "BottlecapDave Octopus Energy next-day import rates event. Leave empty for safe automatic discovery when there is exactly one import meter.",
-          "agile_ready_by": "Target time for a full battery. Use 16:00 for Agile or Cosy.",
-          "agile_protected_until": "End of the household protection window. Use 22:00 for Agile or 19:00 for the Cosy peak only.",
+          "agile_ready_by": "Agile target time for a full battery. Cosy instead follows its fixed three-period daily schedule.",
+          "agile_protected_until": "End of the Agile household protection window. Cosy uses Self-Gen from 07:00-13:00 and 16:00-22:00.",
           "master_device": "Choose the master/coordinator, or leave as manual and enter the IP below. Executor units should not be selected.",
           "dependency_solcast_confirmed": "Tick once Solcast PV Forecast is installed. Used for timed solar forecasts and solar-aware estimates.",
           "dependency_home_occupancy_confirmed": "Tick once home occupancy is enabled. Uses Home Assistant's zone.home occupancy count so empty-house periods do not train the normal demand profile."

@@ -7,32 +7,24 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SENSOR_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "sensor.py").read_text()
 INIT_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "__init__.py").read_text()
-CARD_SOURCE = (
-    ROOT
-    / "custom_components"
-    / "aecc_battery"
-    / "frontend"
-    / "aferiy-agile-plan-card.js"
-).read_text()
+CARD_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "frontend" / "aferiy-agile-plan-card.js").read_text()
 SELECT_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "select.py").read_text()
 SWITCH_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "switch.py").read_text()
-COORDINATOR_SOURCE = (
-    ROOT / "custom_components" / "aecc_battery" / "coordinator.py"
-).read_text()
+COORDINATOR_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "coordinator.py").read_text()
 
 
 def test_sensor_applies_behavioral_source_validator_and_stale_guard() -> None:
     assert "validate_octopus_rate_source(" in SENSOR_SOURCE
     assert "registry_entry.platform" in SENSOR_SOURCE
-    assert 'timedelta(hours=36)' in SENSOR_SOURCE
+    assert "timedelta(hours=36)" in SENSOR_SOURCE
     assert "expected_tariff=self._tariff_family()" in SENSOR_SOURCE
     assert 'return "cosy" if self._tariff_preset()' in SENSOR_SOURCE
 
 
 def test_sensor_waits_for_unpublished_rate_events_without_invalidating_the_other_day() -> None:
-    assert 'raw_rates is None or raw_rates == []' in SENSOR_SOURCE
-    assert 'Octopus has not published {self._day_kind}-day rates' in SENSOR_SOURCE
-    assert 'counterpart_attributes = None' in SENSOR_SOURCE
+    assert "raw_rates is None or raw_rates == []" in SENSOR_SOURCE
+    assert "Octopus has not published {self._day_kind}-day rates" in SENSOR_SOURCE
+    assert "counterpart_attributes = None" in SENSOR_SOURCE
     assert 'and counterpart.attributes.get("rates")' in SENSOR_SOURCE
 
 
@@ -65,9 +57,10 @@ def test_self_gen_reconnect_queue_is_manual_only_and_not_an_agile_control_path()
     assert '"On (60 minutes)"' in SELECT_SOURCE
     assert "async_queue_self_gen_on_reconnect" in SELECT_SOURCE
     assert "Charge, Discharge, Feed, and Agile Proposed Plans are never queued." in SELECT_SOURCE
-    assert "_SELF_GEN_RECONNECT_QUEUE_TTL = timedelta(minutes=60)" in (
-        ROOT / "custom_components" / "aecc_battery" / "coordinator.py"
-    ).read_text()
+    assert (
+        "_SELF_GEN_RECONNECT_QUEUE_TTL = timedelta(minutes=60)"
+        in (ROOT / "custom_components" / "aecc_battery" / "coordinator.py").read_text()
+    )
 
 
 def test_agile_planner_always_exposes_its_battery_capacity_setting() -> None:
@@ -131,7 +124,9 @@ def test_card_discovers_entities_and_exposes_energy_costs_and_savings() -> None:
     assert "All half-hour ${this._escape(tariffName)} prices" in CARD_SOURCE
     assert 'attrs.tariff_name || "Octopus Agile"' in CARD_SOURCE
     assert 'tariffName === "Cosy Octopus"' in CARD_SOURCE
-    assert "Advisory plan only" in CARD_SOURCE
+    assert 'attrs.tariff_strategy === "cosy_fixed_daily_schedule"' in CARD_SOURCE
+    assert "Charge to target" in CARD_SOURCE
+    assert "CT-controlled" in CARD_SOURCE
     assert "Rolling horizon active" in CARD_SOURCE
     assert "Battery SOC starts below reserve" in CARD_SOURCE
     assert "projected_soc_at_protection_end" in CARD_SOURCE
@@ -154,7 +149,7 @@ def test_shadow_state_machine_is_registered_and_remains_view_only() -> None:
 
 def test_agile_control_is_explicit_guarded_and_recoverable() -> None:
     assert "AeccAgileAutomaticControlSwitch" in SWITCH_SOURCE
-    assert 'self._enabled = False' in SWITCH_SOURCE
+    assert "self._enabled = False" in SWITCH_SOURCE
     assert 'self._attr_unique_id = f"{config_entry.entry_id}_agile_automatic_control"' in SWITCH_SOURCE
     assert "_AGILE_CONFIRM_POLLS = 2" in SWITCH_SOURCE
     assert "agile_control_mode_for_state(" in SWITCH_SOURCE
@@ -168,6 +163,7 @@ def test_agile_control_is_explicit_guarded_and_recoverable() -> None:
     assert "payload[REG_CONTROL_TIME2] = SLOT_DISABLED" in COORDINATOR_SOURCE
     assert "agile_control_command_errors(" in COORDINATOR_SOURCE
     assert "_async_disable_agile_control" in SELECT_SOURCE
+    assert "COSY_OCTOPUS_TARIFF_PRESET" in SWITCH_SOURCE
 
 
 def test_agile_card_surfaces_but_does_not_silently_enable_control() -> None:

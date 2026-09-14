@@ -122,10 +122,7 @@ def test_midnight_ending_slot_is_not_mistaken_for_pre_deadline_charge() -> None:
     )
 
     assert plan["planned_grid_charge_kwh"] == 0
-    assert not any(
-        slot["local_start"] == "23:30" and slot["action"] == "charge"
-        for slot in plan["slots"]
-    )
+    assert not any(slot["local_start"] == "23:30" and slot["action"] == "charge" for slot in plan["slots"])
 
 
 def test_current_day_can_omit_elapsed_periods_when_all_actionable_periods_exist() -> None:
@@ -385,10 +382,9 @@ def test_shadow_decision_fails_safe_for_stale_connection_or_reserve() -> None:
 def test_control_mode_mapping_rejects_mismatched_or_unknown_decisions() -> None:
     assert AGILE.agile_control_mode_for_state("Planned Charge", "Charge") == "Charge"
     assert AGILE.agile_control_mode_for_state("Post-solar Hold", "Idle") == "Idle"
-    assert (
-        AGILE.agile_control_mode_for_state("Peak Self-Gen", "Self-Gen/Zero Export")
-        == "Self-Gen/Zero Export"
-    )
+    assert AGILE.agile_control_mode_for_state("Peak Self-Gen", "Self-Gen/Zero Export") == "Self-Gen/Zero Export"
+    assert AGILE.agile_control_mode_for_state("Cosy Cheap Hold", "Idle") == "Idle"
+    assert AGILE.agile_control_mode_for_state("Cosy Self-Gen", "Self-Gen/Zero Export") == "Self-Gen/Zero Export"
     assert AGILE.agile_control_mode_for_state("Planned Charge", "Discharge") is None
     assert AGILE.agile_control_mode_for_state("Unexpected", "Charge") is None
     assert AGILE.agile_control_mode_for_state("Unexpected", "Feed") is None
@@ -407,16 +403,22 @@ def test_automated_charge_window_honours_partial_slot_and_rejects_bad_windows() 
     assert window is not None
     assert window[0].isoformat() == "2026-08-24T13:00:00+01:00"
     assert window[1].isoformat() == "2026-08-24T13:15:00+01:00"
-    assert AGILE.bounded_agile_command_window(
-        "Charge",
-        {**attributes, "planned_slot_start": "2026-08-24T13:30:00+01:00"},
-        now,
-    ) is None
-    assert AGILE.bounded_agile_command_window(
-        "Charge",
-        {**attributes, "planned_slot_duration_minutes": 31},
-        now,
-    ) is None
+    assert (
+        AGILE.bounded_agile_command_window(
+            "Charge",
+            {**attributes, "planned_slot_start": "2026-08-24T13:30:00+01:00"},
+            now,
+        )
+        is None
+    )
+    assert (
+        AGILE.bounded_agile_command_window(
+            "Charge",
+            {**attributes, "planned_slot_duration_minutes": 31},
+            now,
+        )
+        is None
+    )
     assert AGILE.bounded_agile_command_window("Feed", attributes, now) is None
 
 
@@ -488,9 +490,7 @@ def test_unprofitable_periods_are_not_discharged() -> None:
 def test_published_tomorrow_rates_value_tonights_discharge() -> None:
     today_rates = _rates("2026-07-27", protected_rate=0.25)
     for rate in today_rates:
-        if datetime.fromisoformat(str(rate["start"])).astimezone(
-            ZoneInfo("Europe/London")
-        ).hour >= 16:
+        if datetime.fromisoformat(str(rate["start"])).astimezone(ZoneInfo("Europe/London")).hour >= 16:
             rate["value_inc_vat"] = 0.25
     tomorrow_rates = _rates("2026-07-28")
     now = datetime(2026, 7, 27, 16, 0, tzinfo=ZoneInfo("Europe/London"))
@@ -539,10 +539,7 @@ def test_tomorrow_payload_with_appended_later_day_is_rejected() -> None:
     plan = _plan(next_day_rates=tomorrow_rates + later_rates)
 
     assert plan["next_day_rates_used"] is False
-    assert any(
-        "outside the immediately following date" in error
-        for error in plan["next_day_rate_validation_errors"]
-    )
+    assert any("outside the immediately following date" in error for error in plan["next_day_rate_validation_errors"])
 
 
 def test_tomorrow_midnight_ending_slot_is_not_used_as_refill_price() -> None:
@@ -594,12 +591,15 @@ def test_octopus_source_metadata_is_validated_behaviorally() -> None:
         "serial_number": "meter-1",
         "tariff_code": "E-1R-AGILE-24-10-01-A",
     }
-    assert AGILE.validate_octopus_rate_source(
-        "event.renamed_current_rates",
-        "octopus_energy",
-        valid,
-        dict(valid),
-    ) == []
+    assert (
+        AGILE.validate_octopus_rate_source(
+            "event.renamed_current_rates",
+            "octopus_energy",
+            valid,
+            dict(valid),
+        )
+        == []
+    )
 
     assert AGILE.validate_octopus_rate_source(
         "event.fake_current_day_rates",
@@ -631,13 +631,16 @@ def test_cosy_octopus_source_metadata_is_accepted_for_cosy_planning() -> None:
         "tariff_code": "E-1R-COSY-24-07-01-A",
     }
 
-    assert AGILE.validate_octopus_rate_source(
-        "event.renamed_current_rates",
-        "octopus_energy",
-        cosy,
-        dict(cosy),
-        expected_tariff="cosy",
-    ) == []
+    assert (
+        AGILE.validate_octopus_rate_source(
+            "event.renamed_current_rates",
+            "octopus_energy",
+            cosy,
+            dict(cosy),
+            expected_tariff="cosy",
+        )
+        == []
+    )
     assert AGILE.validate_octopus_rate_source(
         "event.renamed_current_rates",
         "octopus_energy",
@@ -646,7 +649,7 @@ def test_cosy_octopus_source_metadata_is_accepted_for_cosy_planning() -> None:
     )
 
 
-def test_cosy_half_hour_rates_produce_charge_and_peak_discharge_plan() -> None:
+def test_cosy_half_hour_rates_produce_fixed_daily_operating_schedule() -> None:
     rates = _rates("2026-07-27", protected_rate=0.40)
     local = ZoneInfo("Europe/London")
     for rate in rates:
@@ -668,14 +671,71 @@ def test_cosy_half_hour_rates_produce_charge_and_peak_discharge_plan() -> None:
         ready_by="16:00",
         protected_until="19:00",
     )
+    plan = AGILE.apply_cosy_rate_schedule(plan)
 
     charge_slots = [slot for slot in plan["slots"] if slot["action"] == "charge"]
-    discharge_slots = [slot for slot in plan["slots"] if slot["action"] == "discharge"]
+    idle_slots = [slot for slot in plan["slots"] if slot["action"] == "idle"]
+    self_gen_slots = [slot for slot in plan["slots"] if slot["action"] == "self_gen"]
     assert plan["status"] == "proposed"
-    assert charge_slots
-    assert discharge_slots
+    assert plan["tariff_strategy"] == "cosy_fixed_daily_schedule"
+    assert plan["scheduled_charge_periods"] == 16
+    assert plan["scheduled_idle_periods"] == 8
+    assert plan["scheduled_self_gen_periods"] == 24
     assert all(slot["rate_gbp_per_kwh"] == 0.10 for slot in charge_slots)
-    assert all("16:00" <= slot["local_start"] < "19:00" for slot in discharge_slots)
+    assert all(slot["local_start"] < "04:00" for slot in idle_slots)
+    assert all(
+        "07:00" <= slot["local_start"] < "13:00" or "16:00" <= slot["local_start"] < "22:00" for slot in self_gen_slots
+    )
+
+
+def test_cosy_shadow_charges_holds_and_self_generates_by_tariff_phase() -> None:
+    now = datetime(2026, 7, 27, 4, 0, tzinfo=ZoneInfo("Europe/London"))
+    plan = {
+        "status": "proposed",
+        "target_soc": 80,
+        "tariff_strategy": "cosy_fixed_daily_schedule",
+        "slots": [],
+    }
+
+    def decision(action: str, soc: float = 40) -> dict[str, object]:
+        return AGILE.build_agile_shadow_decision(
+            plan,
+            now=now,
+            connection_fresh=True,
+            soc_percent=soc,
+            reserve_soc=15,
+            pv_power_w=0,
+            total_charge_power_w=0,
+            ac_charge_power_w=0,
+            pv_quiet_minutes=30,
+            locked_action={"action": action},
+        )
+
+    assert decision("charge")["recommended_operating_mode"] == "Charge"
+    assert decision("charge", 80)["state"] == "Cosy Cheap Hold"
+    assert decision("charge", 80)["recommended_operating_mode"] == "Idle"
+    assert decision("idle")["state"] == "Cosy Overnight Hold"
+    assert decision("idle")["recommended_operating_mode"] == "Idle"
+    assert decision("self_gen")["state"] == "Cosy Self-Gen"
+    assert decision("self_gen")["recommended_operating_mode"] == "Self-Gen/Zero Export"
+
+
+def test_cosy_schedule_rejects_incomplete_late_day_rates() -> None:
+    rates = _rates("2026-07-27")[:-1]
+    economic_plan = AGILE.build_agile_day_plan(
+        rates,
+        timezone="Europe/London",
+        battery_capacity_kwh=5.874,
+        starting_soc=80,
+        reserve_soc=10,
+        expected_date=date(2026, 7, 27),
+        protected_until="19:00",
+    )
+
+    assert economic_plan["status"] == "proposed"
+    cosy_plan = AGILE.apply_cosy_rate_schedule(economic_plan)
+    assert cosy_plan["status"] == "invalid"
+    assert "complete local day" in cosy_plan["reason"]
 
 
 def test_non_finite_battery_inputs_fail_safe() -> None:

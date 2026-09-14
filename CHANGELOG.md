@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.8.21
+
+- Replace Cosy's generic Agile optimisation with a fixed daily operating plan:
+  Charge-to-target at 04:00-07:00, 13:00-16:00, and 22:00-00:00; Idle at
+  00:00-04:00; and CT-controlled Self-Gen/Zero Export at 07:00-13:00 and
+  16:00-22:00.
+- Let the existing opt-in guarded controller execute the Cosy schedule while
+  retaining target-SOC, live-PV, stale-data, topology, command-window, and
+  restart-recovery protections. Fixed-window Overnight Charge must remain Off.
+- Show Cosy Charge, Idle, and Self-Gen phases directly on the bundled Agile
+  card alongside the tariff's validated half-hour prices.
+
 ## 1.8.20
 
 - Extend the Octopus rate-source validator and Proposed Plan sensors to accept

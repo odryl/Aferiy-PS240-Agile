@@ -54,8 +54,7 @@ SELF_GEN_RECONNECT_QUEUE_OPTIONS = [
     SELF_GEN_RECONNECT_QUEUE_ENABLED,
 ]
 CAPACITY_PRESET_OPTIONS = [
-    battery_capacity_preset_label(module_count)
-    for module_count in BATTERY_CAPACITY_PRESET_MODULE_COUNTS
+    battery_capacity_preset_label(module_count) for module_count in BATTERY_CAPACITY_PRESET_MODULE_COUNTS
 ]
 OVERNIGHT_CHARGE_MODE_OPTIONS = list(OVERNIGHT_CHARGE_MODE_LABELS.values())
 TARIFF_PRESET_SHORT_LABELS = {
@@ -75,9 +74,7 @@ TARIFF_PRESET_SHORT_LABELS = {
     "custom": "Custom",
 }
 TARIFF_PRESET_OPTIONS = [TARIFF_PRESET_SHORT_LABELS[value] for value in TARIFF_PRESETS]
-TARIFF_PRESET_FROM_LABEL = {
-    label: value for value, label in TARIFF_PRESET_SHORT_LABELS.items()
-}
+TARIFF_PRESET_FROM_LABEL = {label: value for value, label in TARIFF_PRESET_SHORT_LABELS.items()}
 TARIFF_PRESET_FROM_LABEL.update(
     {
         "Octopus Intelligent Go": "octopus_intelligent_go",
@@ -344,9 +341,7 @@ class AeccSelfGenReconnectQueueSelect(
             "pending_restore": pending is not None,
             "requested_at": pending.get("requested_at") if pending else None,
             "expires_at": pending.get("expires_at") if pending else None,
-            "safety_note": (
-                "Charge, Discharge, Feed, and Agile Proposed Plans are never queued."
-            ),
+            "safety_note": ("Charge, Discharge, Feed, and Agile Proposed Plans are never queued."),
         }
 
     async def async_select_option(self, option: str) -> None:
@@ -412,9 +407,7 @@ class AeccBatteryCapacityPresetSelect(
 
     @property
     def current_option(self) -> str | None:
-        capacity = float(
-            getattr(self.coordinator, "battery_capacity_kwh", DEFAULT_BATTERY_CAPACITY_KWH)
-        )
+        capacity = float(getattr(self.coordinator, "battery_capacity_kwh", DEFAULT_BATTERY_CAPACITY_KWH))
         return _closest_capacity_preset(capacity)
 
     @property
@@ -430,9 +423,7 @@ class AeccBatteryCapacityPresetSelect(
         capacity_kwh = battery_capacity_for_modules(module_count)
         self._selected_option = option
         self.coordinator.battery_capacity_kwh = capacity_kwh
-        await self.coordinator.async_save_runtime_preferences(
-            battery_capacity_kwh=round(capacity_kwh, 3)
-        )
+        await self.coordinator.async_save_runtime_preferences(battery_capacity_kwh=round(capacity_kwh, 3))
         _LOGGER.info(
             "Stored AECC battery capacity preset %s as %.3f kWh. No battery command sent.",
             option,
@@ -481,9 +472,7 @@ class AeccAutomaticOvernightChargingSelect(
             )
 
         self.coordinator.set_overnight_charging_mode(self._selected_mode)
-        await self.coordinator.async_save_runtime_preferences(
-            overnight_charging_mode=self._selected_mode
-        )
+        await self.coordinator.async_save_runtime_preferences(overnight_charging_mode=self._selected_mode)
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -508,10 +497,7 @@ class AeccAutomaticOvernightChargingSelect(
             "off_peak_end": getattr(self.coordinator, "off_peak_end", None),
             "target_source": status.get("target_source"),
             "target_soc": status.get("target_soc"),
-            "note": (
-                "On uses Recommended Overnight SOC. Manual uses the SMART Config "
-                "Manual Overnight Target slider."
-            ),
+            "note": ("On uses Recommended Overnight SOC. Manual uses the SMART Config Manual Overnight Target slider."),
         }
 
     async def async_select_option(self, option: str) -> None:
@@ -610,11 +596,7 @@ class AeccSmartTariffPresetSelect(
                 "preset": preset,
                 "preset_label": TARIFF_PRESET_LABELS.get(preset),
                 "dynamic_rates": True,
-                "planner_mode": (
-                    "guarded_control"
-                    if self.coordinator.agile_control_enabled
-                    else "shadow"
-                ),
+                "planner_mode": ("guarded_control" if self.coordinator.agile_control_enabled else "shadow"),
                 "note": (
                     "The Agile Proposed Plan uses Octopus half-hourly rate events. "
                     "The separate guarded control switch is opt-in and the fixed-window "
@@ -637,6 +619,10 @@ class AeccSmartTariffPresetSelect(
         if preset == COSY_OCTOPUS_TARIFF_PRESET:
             attributes.update(
                 {
+                    "dynamic_rates": True,
+                    "planner_mode": (
+                        "guarded_control" if self.coordinator.agile_control_enabled else "shadow"
+                    ),
                     "cheap_rate_windows": [
                         {"start": window_start, "end": window_end}
                         for window_start, window_end in TARIFF_CHEAP_WINDOWS[preset]
@@ -645,11 +631,18 @@ class AeccSmartTariffPresetSelect(
                         {"start": window_start, "end": window_end}
                         for window_start, window_end in TARIFF_PEAK_WINDOWS[preset]
                     ],
-                    "scheduler_window": {"start": start, "end": end},
+                    "operating_schedule": [
+                        {"start": "00:00", "end": "04:00", "mode": "Idle"},
+                        {"start": "04:00", "end": "07:00", "mode": "Charge to target"},
+                        {"start": "07:00", "end": "13:00", "mode": "Self-Gen/Zero Export"},
+                        {"start": "13:00", "end": "16:00", "mode": "Charge to target"},
+                        {"start": "16:00", "end": "22:00", "mode": "Self-Gen/Zero Export"},
+                        {"start": "22:00", "end": "00:00", "mode": "Charge to target"},
+                    ],
                     "note": (
-                        "Cosy has three cheap periods. The overnight battery target "
-                        "uses the 04:00-07:00 morning dip; the dashboard also shows "
-                        "the 13:00-16:00 and 22:00-00:00 dips and 16:00-19:00 peak."
+                        "Cosy uses all three cheap periods for charge-to-target, holds "
+                        "Idle from 00:00-04:00, and uses CT-controlled Self-Gen/Zero "
+                        "Export from 07:00-13:00 and 16:00-22:00. Guarded control is opt-in."
                     ),
                 }
             )
@@ -664,12 +657,12 @@ class AeccSmartTariffPresetSelect(
         if preset != OCTOPUS_AGILE_TARIFF_PRESET:
             await _async_disable_agile_control(
                 self.coordinator,
-                f"tariff changed away from Octopus Agile: {option}",
+                f"tariff plan changed: {option}",
             )
         start, end = self._window_for_preset(preset)
         self._selected_preset = preset
         self.coordinator.set_smart_tariff_preset(preset)
-        if preset == OCTOPUS_AGILE_TARIFF_PRESET:
+        if preset in (OCTOPUS_AGILE_TARIFF_PRESET, COSY_OCTOPUS_TARIFF_PRESET):
             self.coordinator.set_overnight_charging_mode(OVERNIGHT_CHARGE_MODE_DISABLED)
         if preset == "custom":
             start, end = self._window_for_preset(preset)
@@ -682,7 +675,7 @@ class AeccSmartTariffPresetSelect(
             manual_off_peak_end=getattr(self.coordinator, "manual_off_peak_end", end),
             **(
                 {"overnight_charging_mode": OVERNIGHT_CHARGE_MODE_DISABLED}
-                if preset == OCTOPUS_AGILE_TARIFF_PRESET
+                if preset in (OCTOPUS_AGILE_TARIFF_PRESET, COSY_OCTOPUS_TARIFF_PRESET)
                 else {}
             ),
         )
@@ -768,9 +761,7 @@ class AeccSolarAvailabilitySelect(
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
-            "solar_unavailable_override": bool(
-                getattr(self.coordinator, "solar_unavailable_override", False)
-            ),
+            "solar_unavailable_override": bool(getattr(self.coordinator, "solar_unavailable_override", False)),
             "status": (
                 "Batteries Only"
                 if bool(getattr(self.coordinator, "solar_unavailable_override", False))

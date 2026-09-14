@@ -31,6 +31,12 @@ The planner enforces these invariants:
 - live SOC below reserve is recoverable: recharge includes the reserve deficit,
   while projected discharge remains zero until reserve is restored
 
+When Cosy is selected, the validated prices are presented with a fixed tariff
+schedule: Charge-to-target at 04:00-07:00, 13:00-16:00, and 22:00-00:00; Idle
+at 00:00-04:00; and CT-controlled Self-Gen/Zero Export at 07:00-13:00 and
+16:00-22:00. Live PV takes priority over grid charge, and reaching target SOC
+changes the cheap-period recommendation to Idle.
+
 Before next-day rates are published, Tomorrow's plan assumes the battery begins
 at its reserve SOC. Once both valid days are available, Today values discharge
 against enough of tomorrow's cheapest pre-deadline periods to refill the
@@ -63,8 +69,8 @@ commands to the selected half-hour/partial period, and verifies every register
 write. Profitable discharge always selects Self-Gen/Zero Export so the PS240 CT
 loop follows household load; fixed Discharge and Feed are forbidden.
 
-The controller interlocks against the legacy overnight scheduler, non-Agile
-tariffs, incomplete storage topology, stale telemetry, and invalid decisions.
+The controller interlocks against the legacy overnight scheduler, tariffs other
+than Agile or Cosy, incomplete storage topology, stale telemetry, and invalid decisions.
 Turning it off or making a manual mode selection restores Self-Gen. A persisted
 pending-restore marker survives restart without restoring the toggle itself,
 allowing an interrupted custom command to be cleared after the next healthy

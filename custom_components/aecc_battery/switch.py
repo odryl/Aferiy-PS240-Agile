@@ -22,6 +22,7 @@ from .agile import agile_control_mode_for_state, bounded_agile_command_window
 from .const import (
     AGILE_MAX_SYSTEM_CHARGE_POWER_W,
     CONF_AGILE_PLANNER_ENABLED,
+    COSY_OCTOPUS_TARIFF_PRESET,
     DEFAULT_AGILE_PLANNER_ENABLED,
     DOMAIN,
     MODE_SELF_CONSUMPTION,
@@ -52,9 +53,7 @@ async def async_setup_entry(
     )
 
 
-class AeccWifiLossRecoverySwitch(
-    CoordinatorEntity[AeccBatteryCoordinator], SwitchEntity
-):
+class AeccWifiLossRecoverySwitch(CoordinatorEntity[AeccBatteryCoordinator], SwitchEntity):
     """Opt in to one guarded Linksys 6/11 toggle per battery outage."""
 
     _attr_has_entity_name = True
@@ -114,9 +113,7 @@ class AeccWifiLossRecoverySwitch(
         self.async_write_ha_state()
 
 
-class AeccAgileAutomaticControlSwitch(
-    CoordinatorEntity[AeccBatteryCoordinator], SwitchEntity
-):
+class AeccAgileAutomaticControlSwitch(CoordinatorEntity[AeccBatteryCoordinator], SwitchEntity):
     """Opt-in executor for the guarded Agile operating-state recommendation."""
 
     _attr_has_entity_name = True
@@ -174,9 +171,7 @@ class AeccAgileAutomaticControlSwitch(
             "active_slot_start": self._active_slot_start,
             "active_slot_end": self._active_slot_end,
             "last_command": self._last_command,
-            "last_command_at": (
-                self._last_command_at.isoformat() if self._last_command_at else None
-            ),
+            "last_command_at": (self._last_command_at.isoformat() if self._last_command_at else None),
             "last_command_result": self._last_command_result,
             "confirmation_count": self._candidate_confirmations,
             "confirmation_required": _AGILE_CONFIRM_POLLS,
@@ -189,9 +184,7 @@ class AeccAgileAutomaticControlSwitch(
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         self.coordinator.agile_controller = self
-        self.async_on_remove(
-            self.hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed)
-        )
+        self.async_on_remove(self.hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed))
 
     async def async_will_remove_from_hass(self) -> None:
         await self.async_shutdown()
@@ -240,9 +233,12 @@ class AeccAgileAutomaticControlSwitch(
             CONF_AGILE_PLANNER_ENABLED,
             DEFAULT_AGILE_PLANNER_ENABLED,
         ):
-            return "The Agile planner is disabled in integration options."
-        if self.coordinator.smart_tariff_preset != OCTOPUS_AGILE_TARIFF_PRESET:
-            return "The tariff preset is not Octopus Agile."
+            return "The Octopus rate planner is disabled in integration options."
+        if self.coordinator.smart_tariff_preset not in (
+            OCTOPUS_AGILE_TARIFF_PRESET,
+            COSY_OCTOPUS_TARIFF_PRESET,
+        ):
+            return "The tariff preset is not Octopus Agile or Cosy."
         if self.coordinator.overnight_charging_mode != OVERNIGHT_CHARGE_MODE_DISABLED:
             return "The fixed-window overnight scheduler must be Off."
         if self.coordinator.storage_topology_incomplete:
@@ -308,9 +304,7 @@ class AeccAgileAutomaticControlSwitch(
         self._last_command = "restore_self_gen"
         self._last_command_at = datetime.now(UTC)
         self._last_command_result = (
-            f"exception: {restore_exception}"
-            if restore_exception is not None
-            else "verified" if success else "failed"
+            f"exception: {restore_exception}" if restore_exception is not None else "verified" if success else "failed"
         )
         if success:
             self._owns_control = False
@@ -347,9 +341,7 @@ class AeccAgileAutomaticControlSwitch(
             return
         if not self._confirmed(mode, slot_key):
             self._status = "Confirming"
-            self._reason = (
-                f"Waiting for {_AGILE_CONFIRM_POLLS} fresh telemetry polls before starting {state}."
-            )
+            self._reason = f"Waiting for {_AGILE_CONFIRM_POLLS} fresh telemetry polls before starting {state}."
             return
 
         power = 0
@@ -368,9 +360,7 @@ class AeccAgileAutomaticControlSwitch(
         recovery_armed = await self.coordinator.async_set_agile_control_pending_restore(True)
         if not recovery_armed:
             self._status = "Inhibited"
-            self._reason = (
-                "The restart-recovery marker could not be persisted; no battery command was sent."
-            )
+            self._reason = "The restart-recovery marker could not be persisted; no battery command was sent."
             self._last_command_result = "recovery_marker_failed"
             return
         command_exception: str | None = None
@@ -390,9 +380,7 @@ class AeccAgileAutomaticControlSwitch(
         self._last_command = f"{mode.lower()} {start.strftime('%H:%M')}-{end.strftime('%H:%M')}"
         self._last_command_at = datetime.now(UTC)
         self._last_command_result = (
-            f"exception: {command_exception}"
-            if command_exception is not None
-            else "verified" if success else "failed"
+            f"exception: {command_exception}" if command_exception is not None else "verified" if success else "failed"
         )
         if not success:
             self._owns_control = True
@@ -425,7 +413,7 @@ class AeccAgileAutomaticControlSwitch(
             if mode is None:
                 await self._async_restore_self_gen("A validated operating decision is unavailable.")
                 self._status = "Fail-safe"
-                self._reason = "A validated Agile operating decision is unavailable."
+                self._reason = "A validated Octopus rate-plan decision is unavailable."
                 self.async_write_ha_state()
                 return
 
@@ -451,15 +439,12 @@ class AeccAgileAutomaticControlSwitch(
                 self.async_write_ha_state()
                 return
             current_mode = self.coordinator.commanded_operating_mode
-            if (
-                current_mode is None
-                and self.coordinator.commanded_work_mode != MODE_SELF_CONSUMPTION
-            ):
+            if current_mode is None and self.coordinator.commanded_work_mode != MODE_SELF_CONSUMPTION:
                 current_mode = self.coordinator.commanded_direction or "Custom / Manual"
             if current_mode not in (None, "Self-Gen/Zero Export"):
                 self._status = "Inhibited"
                 self._reason = (
-                    f"Operating Mode is {current_mode}; select Self-Gen/Zero Export before enabling Agile control."
+                    f"Operating Mode is {current_mode}; select Self-Gen/Zero Export before enabling automated control."
                 )
                 self.async_write_ha_state()
                 return
@@ -476,11 +461,7 @@ class AeccAgileAutomaticControlSwitch(
             self._enabled = False
             self.coordinator.agile_control_enabled = False
             await self._async_restore_self_gen(f"Agile control disabled: {reason}.")
-            self._status = (
-                "Off"
-                if not self.coordinator.agile_control_pending_restore
-                else "Restore pending"
-            )
+            self._status = "Off" if not self.coordinator.agile_control_pending_restore else "Restore pending"
             if not self.coordinator.agile_control_pending_restore:
                 self._reason = f"Automatic Agile control is off: {reason}."
             if was_enabled:
@@ -502,9 +483,7 @@ class AeccAgileAutomaticControlSwitch(
         self._evaluation_task = None
 
 
-class AeccAutomaticDataloggerRestartSwitch(
-    CoordinatorEntity[AeccBatteryCoordinator], SwitchEntity
-):
+class AeccAutomaticDataloggerRestartSwitch(CoordinatorEntity[AeccBatteryCoordinator], SwitchEntity):
     """Enable a local datalogger restart every three hours."""
 
     _attr_has_entity_name = True
@@ -543,9 +522,7 @@ class AeccAutomaticDataloggerRestartSwitch(
             "next_restart_at": next_restart.isoformat() if next_restart else None,
             "last_restart_at": last_restart.isoformat() if last_restart else None,
             "last_restart_reason": self.coordinator.last_datalogger_restart_reason,
-            "last_restart_dispatched": (
-                self.coordinator.last_datalogger_restart_dispatched
-            ),
+            "last_restart_dispatched": (self.coordinator.last_datalogger_restart_dispatched),
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:

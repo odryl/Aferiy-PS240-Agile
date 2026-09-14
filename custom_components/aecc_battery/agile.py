@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from itertools import pairwise
 from math import isfinite
 from typing import Any
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 _SAFE_AGILE_CHARGE_POWER_CEILING_W = 1200
 _SAFE_AGILE_DISCHARGE_POWER_CEILING_W = 1000
@@ -16,6 +16,7 @@ _DEFAULT_MINIMUM_SAVING_GBP_PER_KWH = 0.03
 _REQUIRED_SOURCE_ATTRIBUTES = ("mpan", "serial_number", "tariff_code")
 _PLANNER_REVISION = 3
 _SHADOW_DECISION_REVISION = 1
+_COSY_SCHEDULE_REVISION = 1
 
 
 def validate_octopus_rate_source(
@@ -39,9 +40,7 @@ def validate_octopus_rate_source(
     tariff_code = str(attributes.get("tariff_code") or "")
     expected_marker = "COSY" if expected_tariff.lower() == "cosy" else "AGILE"
     if tariff_code and expected_marker not in tariff_code.upper():
-        errors.append(
-            f"The selected import tariff is not an Octopus {expected_marker.title()} tariff."
-        )
+        errors.append(f"The selected import tariff is not an Octopus {expected_marker.title()} tariff.")
 
     if counterpart_attributes is not None:
         for attribute in _REQUIRED_SOURCE_ATTRIBUTES:
@@ -144,15 +143,10 @@ def _validate_actionable_coverage(
     expected_periods = int(
         max(
             0,
-            (coverage_end.astimezone(UTC) - coverage_start.astimezone(UTC)).total_seconds()
-            / 1800,
+            (coverage_end.astimezone(UTC) - coverage_start.astimezone(UTC)).total_seconds() / 1800,
         )
     )
-    actionable_rates = [
-        rate
-        for rate in rates
-        if coverage_start <= rate.start < coverage_end
-    ]
+    actionable_rates = [rate for rate in rates if coverage_start <= rate.start < coverage_end]
     errors: list[str] = []
     if len(actionable_rates) != expected_periods:
         errors.append(
@@ -162,13 +156,9 @@ def _validate_actionable_coverage(
             f"received {len(actionable_rates)}."
         )
     if actionable_rates and actionable_rates[0].start != coverage_start:
-        errors.append(
-            f"First actionable rate does not begin at {coverage_start.isoformat()}."
-        )
+        errors.append(f"First actionable rate does not begin at {coverage_start.isoformat()}.")
     if actionable_rates and actionable_rates[-1].end != coverage_end:
-        errors.append(
-            f"Last actionable rate does not end at {coverage_end.isoformat()}."
-        )
+        errors.append(f"Last actionable rate does not end at {coverage_end.isoformat()}.")
     for previous, current in pairwise(actionable_rates):
         if current.start != previous.end:
             errors.append(f"Rate coverage has a gap or overlap at {current.start.isoformat()}.")
@@ -218,9 +208,7 @@ def build_agile_day_plan(
     payload_date = rates[0].start.astimezone(local_zone).date()
     day = expected_date or payload_date
     if payload_date != day:
-        return _invalid_plan(
-            f"Rate payload is for {payload_date.isoformat()}, expected {day.isoformat()}."
-        )
+        return _invalid_plan(f"Rate payload is for {payload_date.isoformat()}, expected {day.isoformat()}.")
     if now is None:
         planning_time = datetime.combine(day, time.min, tzinfo=local_zone)
     elif now.tzinfo is None:
@@ -248,16 +236,9 @@ def build_agile_day_plan(
         elif not parsed_next_rates:
             next_rate_errors.append("The next-day source entity has no rates list.")
         elif parsed_next_rates[0].start.astimezone(local_zone).date() != next_day:
-            next_rate_errors.append(
-                "Next-day rate payload is not for the date immediately after this plan."
-            )
-        elif any(
-            rate.start.astimezone(local_zone).date() != next_day
-            for rate in parsed_next_rates
-        ):
-            next_rate_errors.append(
-                "Next-day rate payload contains periods outside the immediately following date."
-            )
+            next_rate_errors.append("Next-day rate payload is not for the date immediately after this plan.")
+        elif any(rate.start.astimezone(local_zone).date() != next_day for rate in parsed_next_rates):
+            next_rate_errors.append("Next-day rate payload contains periods outside the immediately following date.")
         else:
             next_ready_at = datetime.combine(next_day, ready_time, tzinfo=local_zone)
             _, next_coverage_errors = _validate_actionable_coverage(
@@ -336,10 +317,7 @@ def build_agile_day_plan(
     if capacity <= 0:
         return _invalid_plan("Battery capacity must be greater than zero.")
     if not 0 <= start_soc <= 100 or not 0 <= reserve <= target <= 100:
-        return _invalid_plan(
-            "SOC inputs must satisfy 0 <= starting SOC <= 100 and "
-            "0 <= reserve <= target <= 100."
-        )
+        return _invalid_plan("SOC inputs must satisfy 0 <= starting SOC <= 100 and 0 <= reserve <= target <= 100.")
     if not 0 < charge_efficiency <= 1 or not 0 < discharge_efficiency <= 1:
         return _invalid_plan("Charge and discharge efficiencies must be greater than 0 and at most 1.")
     if minimum_saving < 0:
@@ -356,16 +334,12 @@ def build_agile_day_plan(
         int(requested_discharge_power_w),
     )
     charge_candidates = [
-        rate
-        for rate in rates
-        if rate.start >= planning_time
-        and rate.end.astimezone(local_zone) <= ready_at
+        rate for rate in rates if rate.start >= planning_time and rate.end.astimezone(local_zone) <= ready_at
     ]
     discharge_candidates = [
         rate
         for rate in rates
-        if rate.start >= planning_time
-        and ready_at <= rate.start.astimezone(local_zone) < protected_at
+        if rate.start >= planning_time and ready_at <= rate.start.astimezone(local_zone) < protected_at
     ]
 
     charge_grid_limit_kwh = max_charge_power_w / 1000 * 0.5
@@ -389,22 +363,16 @@ def build_agile_day_plan(
         target,
         start_soc + (stored_charge_kwh / capacity * 100 if capacity else 0.0),
     )
-    charge_cost_total = sum(
-        rate.value_inc_vat * charge_energy_by_start.get(rate.start, 0.0) for rate in rates
-    )
+    charge_cost_total = sum(rate.value_inc_vat * charge_energy_by_start.get(rate.start, 0.0) for rate in rates)
     average_charge_rate = charge_cost_total / charge_grid_kwh if charge_grid_kwh else None
-    usable_discharge_kwh = (
-        capacity * max(0.0, projected_ready_soc - reserve) / 100 * discharge_efficiency
-    )
+    usable_discharge_kwh = capacity * max(0.0, projected_ready_soc - reserve) / 100 * discharge_efficiency
     replacement_rate_source = "same_day_planned_charge"
     replacement_charge_rate = average_charge_rate
     if next_charge_rates:
         # Value today's maximum feasible discharge against the cheapest actual
         # periods that can refill it tomorrow. This avoids treating a single
         # unusually cheap half-hour as though it could replace the whole battery.
-        grid_energy_to_replace = usable_discharge_kwh / (
-            charge_efficiency * discharge_efficiency
-        )
+        grid_energy_to_replace = usable_discharge_kwh / (charge_efficiency * discharge_efficiency)
         remaining_grid_energy = grid_energy_to_replace
         replacement_cost_total = 0.0
         replacement_grid_energy = 0.0
@@ -478,20 +446,11 @@ def build_agile_day_plan(
     planned_discharge_kwh = sum(discharge_energy_by_start.values())
     projected_protection_end_soc = max(
         reserve,
-        projected_ready_soc
-        - (
-            planned_discharge_kwh / discharge_efficiency / capacity * 100
-            if capacity
-            else 0.0
-        ),
+        projected_ready_soc - (planned_discharge_kwh / discharge_efficiency / capacity * 100 if capacity else 0.0),
     )
-    avoided_import_cost = sum(
-        rate.value_inc_vat * discharge_energy_by_start.get(rate.start, 0.0) for rate in rates
-    )
+    avoided_import_cost = sum(rate.value_inc_vat * discharge_energy_by_start.get(rate.start, 0.0) for rate in rates)
     replacement_cost = (
-        planned_discharge_kwh * delivered_replacement_cost
-        if delivered_replacement_cost is not None
-        else 0.0
+        planned_discharge_kwh * delivered_replacement_cost if delivered_replacement_cost is not None else 0.0
     )
     estimated_net_saving = max(0.0, avoided_import_cost - replacement_cost)
 
@@ -512,17 +471,9 @@ def build_agile_day_plan(
             planned_energy_kwh = discharge_energy_by_start[rate.start]
             command_power_limit_w = max_discharge_power_w
             duration_minutes = rate.duration_hours * 60
-        average_power_w = (
-            round(planned_energy_kwh / rate.duration_hours * 1000)
-            if planned_energy_kwh > 0
-            else 0
-        )
-        charge_cost = (
-            rate.value_inc_vat * planned_energy_kwh if action == "charge" else 0.0
-        )
-        avoided_cost = (
-            rate.value_inc_vat * planned_energy_kwh if action == "discharge" else 0.0
-        )
+        average_power_w = round(planned_energy_kwh / rate.duration_hours * 1000) if planned_energy_kwh > 0 else 0
+        charge_cost = rate.value_inc_vat * planned_energy_kwh if action == "charge" else 0.0
+        avoided_cost = rate.value_inc_vat * planned_energy_kwh if action == "discharge" else 0.0
         slot_replacement_cost = (
             delivered_replacement_cost * planned_energy_kwh
             if action == "discharge" and delivered_replacement_cost is not None
@@ -567,15 +518,11 @@ def build_agile_day_plan(
         "expected_rate_period_count": full_day_expected_periods,
         "expected_actionable_rate_period_count": expected_periods,
         "planning_time": planning_time.isoformat(),
-        "current_rate_gbp_per_kwh": (
-            round(current_rate.value_inc_vat, 5) if current_rate is not None else None
-        ),
+        "current_rate_gbp_per_kwh": (round(current_rate.value_inc_vat, 5) if current_rate is not None else None),
         "current_rate_start": current_rate.start.isoformat() if current_rate is not None else None,
         "current_rate_end": current_rate.end.isoformat() if current_rate is not None else None,
         "lowest_future_rate_gbp_per_kwh": (
-            round(cheapest_future_rate.value_inc_vat, 5)
-            if cheapest_future_rate is not None
-            else None
+            round(cheapest_future_rate.value_inc_vat, 5) if cheapest_future_rate is not None else None
         ),
         "lowest_future_rate_start": (
             cheapest_future_rate.start.isoformat() if cheapest_future_rate is not None else None
@@ -599,14 +546,14 @@ def build_agile_day_plan(
             "command is sent."
         ),
         "demand_profile_source": (
-            "configured_historical_half_hour_profile"
-            if profile_provided
-            else "no_profile_max_load_assumption"
+            "configured_historical_half_hour_profile" if profile_provided else "no_profile_max_load_assumption"
         ),
         "demand_profile_revision": (
             demand_profile_revision
             if profile_provided and demand_profile_revision
-            else "caller_supplied" if profile_provided else None
+            else "caller_supplied"
+            if profile_provided
+            else None
         ),
         "demand_profile_total_kwh": round(sum(float(value) for value in demand_profile.values()), 3),
         "demand_profile_safety_note": (
@@ -623,9 +570,7 @@ def build_agile_day_plan(
             round(average_charge_rate, 5) if average_charge_rate is not None else None
         ),
         "delivered_replacement_cost_gbp_per_kwh": (
-            round(delivered_replacement_cost, 5)
-            if delivered_replacement_cost is not None
-            else None
+            round(delivered_replacement_cost, 5) if delivered_replacement_cost is not None else None
         ),
         "replacement_rate_source": replacement_rate_source,
         "next_day_rates_used": replacement_rate_source == "next_day_published_rates",
@@ -643,6 +588,130 @@ def build_agile_day_plan(
         "control_enabled": False,
         "slots": slots,
     }
+
+
+def apply_cosy_rate_schedule(plan: Mapping[str, Any]) -> dict[str, Any]:
+    """Apply Cosy's fixed daily operating phases to a validated rate plan.
+
+    Cheap periods are armed for charging to the configured target. The live
+    decision layer changes that to Idle once the target is reached, and still
+    gives useful PV priority during the afternoon cheap period.
+    """
+    scheduled = dict(plan)
+    if scheduled.get("status") not in ("proposed", "limited"):
+        return scheduled
+
+    raw_slots = scheduled.get("slots", [])
+    expected_periods = scheduled.get("expected_rate_period_count")
+    if not isinstance(raw_slots, list) or len(raw_slots) != expected_periods:
+        return _invalid_plan(
+            "Cosy control requires a complete local day of consecutive half-hour prices."
+        )
+    try:
+        local_zone = ZoneInfo(str(scheduled["timezone"]))
+        local_day = date.fromisoformat(str(scheduled["date"]))
+        periods = sorted(
+            (
+                datetime.fromisoformat(str(slot["start"])),
+                datetime.fromisoformat(str(slot["end"])),
+            )
+            for slot in raw_slots
+            if isinstance(slot, Mapping)
+        )
+    except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError):
+        return _invalid_plan("Cosy control could not validate the local rate timetable.")
+    day_start = datetime.combine(local_day, time.min, tzinfo=local_zone).astimezone(UTC)
+    day_end = datetime.combine(local_day + timedelta(days=1), time.min, tzinfo=local_zone).astimezone(UTC)
+    if (
+        not periods
+        or len(periods) != expected_periods
+        or periods[0][0].astimezone(UTC) != day_start
+        or periods[-1][1].astimezone(UTC) != day_end
+        or any(previous[1] != current[0] for previous, current in pairwise(periods))
+    ):
+        return _invalid_plan(
+            "Cosy control requires a complete local day of consecutive half-hour prices."
+        )
+
+    slots: list[dict[str, Any]] = []
+    phase_counts = {"cheap_charge": 0, "overnight_idle": 0, "self_gen": 0}
+    for raw_slot in scheduled.get("slots", []):
+        if not isinstance(raw_slot, Mapping):
+            continue
+        slot = dict(raw_slot)
+        try:
+            local_start = time.fromisoformat(str(slot.get("local_start")))
+        except ValueError:
+            return _invalid_plan("A Cosy plan slot has an invalid local start time.")
+        minute = local_start.hour * 60 + local_start.minute
+        economic_action = str(slot.get("action") or "hold")
+
+        if 240 <= minute < 420 or 780 <= minute < 960 or 1320 <= minute:
+            action = "charge"
+            phase = "cheap_charge"
+            command_power_limit_w = int(
+                scheduled.get("max_system_charge_power_w") or _SAFE_AGILE_CHARGE_POWER_CEILING_W
+            )
+            duration_minutes = 30.0
+        elif minute < 240:
+            action = "idle"
+            phase = "overnight_idle"
+            command_power_limit_w = 0
+            duration_minutes = 30.0
+        else:
+            action = "self_gen"
+            phase = "self_gen"
+            command_power_limit_w = int(
+                scheduled.get("max_system_discharge_power_w") or _SAFE_AGILE_DISCHARGE_POWER_CEILING_W
+            )
+            duration_minutes = 30.0
+
+        phase_counts[phase] += 1
+        if economic_action != action and not (action == "self_gen" and economic_action == "discharge"):
+            slot.update(
+                {
+                    "power_w": 0,
+                    "energy_kwh": 0.0,
+                    "charge_cost_gbp": 0.0,
+                    "avoided_import_cost_gbp": 0.0,
+                    "replacement_cost_gbp": 0.0,
+                    "net_saving_gbp": 0.0,
+                }
+            )
+        slot.update(
+            {
+                "action": action,
+                "economic_action": economic_action,
+                "tariff_phase": phase,
+                "command_power_limit_w": command_power_limit_w,
+                "duration_minutes": duration_minutes,
+            }
+        )
+        slots.append(slot)
+
+    scheduled.update(
+        {
+            "status": "proposed",
+            "reason": (
+                "Cosy schedule: charge to target in the three cheap periods, Idle "
+                "from 00:00-04:00, and CT-controlled Self-Gen/Zero Export from "
+                "07:00-13:00 and 16:00-22:00."
+            ),
+            "economic_plan_status": scheduled.get("status"),
+            "economic_plan_reason": scheduled.get("reason"),
+            "tariff_strategy": "cosy_fixed_daily_schedule",
+            "tariff_schedule_revision": _COSY_SCHEDULE_REVISION,
+            "scheduled_charge_periods": phase_counts["cheap_charge"],
+            "scheduled_idle_periods": phase_counts["overnight_idle"],
+            "scheduled_self_gen_periods": phase_counts["self_gen"],
+            "schedule_note": (
+                "Cheap periods request Charge only while SOC is below target; at target "
+                "they hold Idle. Useful solar always keeps Self-Gen active."
+            ),
+            "slots": slots,
+        }
+    )
+    return scheduled
 
 
 def build_agile_shadow_decision(
@@ -697,14 +766,13 @@ def build_agile_shadow_decision(
         return result(
             "Rate Fail-safe",
             "Self-Gen/Zero Export",
-            "A validated current-day Agile plan is unavailable.",
+            "A validated current-day Octopus rate plan is unavailable.",
         )
 
     action = dict(locked_action or {})
     action_name = str(action.get("action") or "hold")
     action_source = str(
-        action.pop("decision_source", None)
-        or ("pre_boundary_lock" if locked_action else "current_plan")
+        action.pop("decision_source", None) or ("pre_boundary_lock" if locked_action else "current_plan")
     )
     action_attrs = {
         "planned_action": action_name,
@@ -715,17 +783,26 @@ def build_agile_shadow_decision(
         "planned_slot_power_limit_w": action.get("command_power_limit_w"),
         "planned_slot_duration_minutes": action.get("duration_minutes"),
         "target_soc": plan.get("target_soc"),
+        "tariff_strategy": plan.get("tariff_strategy"),
+        "tariff_phase": action.get("tariff_phase"),
     }
 
     inferred_pv_charge_w = max(0.0, total_charge_power_w - ac_charge_power_w)
     solar_active = max(0.0, pv_power_w) >= 50 or inferred_pv_charge_w >= 50
     target_soc = plan.get("target_soc")
     target_reached = bool(
-        isinstance(target_soc, int | float)
-        and isfinite(float(target_soc))
-        and soc_percent >= float(target_soc) - 0.5
+        isinstance(target_soc, int | float) and isfinite(float(target_soc)) and soc_percent >= float(target_soc) - 0.5
     )
 
+    cosy_schedule = plan.get("tariff_strategy") == "cosy_fixed_daily_schedule"
+    if action_name == "charge" and target_reached and cosy_schedule and not solar_active:
+        return result(
+            "Cosy Cheap Hold",
+            "Idle",
+            "Battery SOC has reached the target; hold it during this cheap period.",
+            charge_inhibited_reason="target_reached",
+            **action_attrs,
+        )
     if action_name == "charge" and target_reached:
         return result(
             "Charge Target Reached",
@@ -750,6 +827,20 @@ def build_agile_shadow_decision(
             "The action was selected before the half-hour boundary as a cheap charge slot.",
             **action_attrs,
         )
+    if action_name == "idle":
+        if solar_active:
+            return result(
+                "Solar Self-Gen",
+                "Self-Gen/Zero Export",
+                "Useful PV is present; preserve normal solar capture and CT-controlled flows.",
+                **action_attrs,
+            )
+        return result(
+            "Cosy Overnight Hold",
+            "Idle",
+            "Hold the battery from 00:00-04:00 because useful overnight solar is unavailable.",
+            **action_attrs,
+        )
     if soc_percent <= reserve_soc + 0.5:
         return result(
             "Reserve Protection",
@@ -757,11 +848,15 @@ def build_agile_shadow_decision(
             "Battery SOC is at the configured reserve; fixed discharge is prohibited.",
             **action_attrs,
         )
-    if action_name == "discharge":
+    if action_name in ("discharge", "self_gen"):
         return result(
-            "Peak Self-Gen",
+            "Cosy Self-Gen" if action_name == "self_gen" else "Peak Self-Gen",
             "Self-Gen/Zero Export",
-            "Use CT-controlled Self-Gen during this selected profitable period.",
+            (
+                "Use CT-controlled Self-Gen throughout this Cosy standard or peak period."
+                if action_name == "self_gen"
+                else "Use CT-controlled Self-Gen during this selected profitable period."
+            ),
             **action_attrs,
         )
 
@@ -795,7 +890,7 @@ def build_agile_shadow_decision(
     return result(
         "Solar Self-Gen",
         "Self-Gen/Zero Export",
-        "No locked Agile action requires a mode change; Self-Gen remains the safe default.",
+        "No locked rate-plan action requires a mode change; Self-Gen remains the safe default.",
         **action_attrs,
     )
 
@@ -807,17 +902,22 @@ def agile_control_mode_for_state(
     """Return the only automated mode permitted for a validated decision state."""
     if state == "Planned Charge" and recommended_mode == "Charge":
         return "Charge"
-    if state == "Post-solar Hold" and recommended_mode == "Idle":
+    if state in {"Post-solar Hold", "Cosy Cheap Hold", "Cosy Overnight Hold"} and recommended_mode == "Idle":
         return "Idle"
-    if state in {
-        "Solar Self-Gen",
-        "Solar Charge Deferred",
-        "Charge Target Reached",
-        "Peak Self-Gen",
-        "Reserve Protection",
-        "Connection Fail-safe",
-        "Rate Fail-safe",
-    } and recommended_mode == "Self-Gen/Zero Export":
+    if (
+        state
+        in {
+            "Solar Self-Gen",
+            "Solar Charge Deferred",
+            "Charge Target Reached",
+            "Peak Self-Gen",
+            "Cosy Self-Gen",
+            "Reserve Protection",
+            "Connection Fail-safe",
+            "Rate Fail-safe",
+        }
+        and recommended_mode == "Self-Gen/Zero Export"
+    ):
         return "Self-Gen/Zero Export"
     return None
 

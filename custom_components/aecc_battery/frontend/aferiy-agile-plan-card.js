@@ -145,13 +145,25 @@ class AferiyAgilePlanCard extends HTMLElement {
 
   _slotValue(slot) {
     if (slot.action === "charge") {
-      return `<span class="cost">Cost ${this._money(slot.charge_cost_gbp)}</span>`;
+      return Number(slot.energy_kwh) > 0
+        ? `<span class="cost">Cost ${this._money(slot.charge_cost_gbp)}</span>`
+        : `<span class="cost">Charge to target</span>`;
     }
     if (slot.action === "discharge") {
       return `<span class="saving">Avoid ${this._money(slot.avoided_import_cost_gbp)}<br>
         Save ${this._money(slot.net_saving_gbp)}</span>`;
     }
+    if (slot.action === "self_gen") return `<span class="self-gen">CT-controlled</span>`;
+    if (slot.action === "idle") return `<span class="idle">Hold SOC</span>`;
     return "";
+  }
+
+  _actionLabel(action) {
+    if (action === "self_gen") return "Self-Gen/Zero Export";
+    if (action === "idle") return "Idle";
+    if (action === "charge") return "Charge";
+    if (action === "discharge") return "Self-Gen";
+    return action;
   }
 
   _activeRows(slots, tariffName) {
@@ -162,7 +174,7 @@ class AferiyAgilePlanCard extends HTMLElement {
       <tbody>${active.map((slot) => `
         <tr class="${this._escape(slot.action)}">
           <td><strong>${this._escape(slot.local_start)}</strong></td>
-          <td><span class="action">${this._escape(slot.action)}</span></td>
+          <td><span class="action">${this._escape(this._actionLabel(slot.action))}</span></td>
           <td>${this._rate(slot.rate_gbp_per_kwh)}/kWh</td>
           <td>${this._number(slot.energy_kwh, " kWh", 3)}</td>
           <td>${this._number(slot.power_w, " W", 0)} avg<br><small>≤${this._number(slot.command_power_limit_w, " W", 0)} · ${this._number(slot.duration_minutes, " min", 1)}</small></td>
@@ -178,7 +190,7 @@ class AferiyAgilePlanCard extends HTMLElement {
       ${slots.map((slot) => {
         const current = this._isCurrent(slot, now);
         const tone = this._priceTone(slot.rate_gbp_per_kwh, cheapestRate);
-        const title = `${slot.local_start}: ${this._rate(slot.rate_gbp_per_kwh)}/kWh · ${slot.action}${current ? " · current period" : ""}`;
+        const title = `${slot.local_start}: ${this._rate(slot.rate_gbp_per_kwh)}/kWh · ${this._actionLabel(slot.action)}${current ? " · current period" : ""}`;
         return `<div class="rate ${this._escape(slot.action)} ${this._escape(tone)} ${current ? "current" : ""}" title="${this._escape(title)}">
         <span>${current ? "Now · " : ""}${this._escape(slot.local_start)}</span><strong>${this._rate(slot.rate_gbp_per_kwh)}</strong>
       </div>`;
@@ -209,6 +221,7 @@ class AferiyAgilePlanCard extends HTMLElement {
       ${conservativeTomorrow ? `<p class="notice">Tomorrow assumes the battery starts at its reserve SOC; the plan will refine when it becomes Today.</p>` : ""}
       ${rollingToday ? `<p class="notice rolling">Rolling horizon active: tonight's discharge is valued against published refill prices tomorrow.</p>` : ""}
       ${rollingTomorrow ? `<p class="notice rolling">Rolling horizon active: Tomorrow starts from Today's projected ${this._number(attrs.starting_soc, "%", 0)} SOC.</p>` : ""}
+      ${attrs.tariff_strategy === "cosy_fixed_daily_schedule" ? `<p class="notice rolling">${this._escape(attrs.schedule_note || "Cosy fixed daily schedule is active.")}</p>` : ""}
       <div class="metrics">
         ${this._metric(`Current ${tariffName} price`, `${this._rate(currentRate)}/kWh`, "price")}
         ${this._metric("Cheapest remaining", `${this._rate(attrs.lowest_future_rate_gbp_per_kwh)}/kWh · ${cheapestStart}`, "price")}
@@ -228,7 +241,7 @@ class AferiyAgilePlanCard extends HTMLElement {
         <span>AC charge limit ${this._number(attrs.max_system_charge_power_w, " W", 0)}</span>
         <span>Self-Gen house output ${this._number(attrs.max_system_discharge_power_w, " W", 0)}</span>
       </div>
-      <h4>Charge and discharge schedule</h4>
+      <h4>Battery operating schedule</h4>
       ${this._activeRows(slots, tariffName)}
       ${this._rateTimeline(slots, cheapestRate, label.toLowerCase(), tariffName)}
       <p class="footnote">${this._escape(attrs.cost_estimate_note || "Costs are estimates, not a complete electricity bill.")}</p>
@@ -270,11 +283,12 @@ class AferiyAgilePlanCard extends HTMLElement {
         .table-wrap { overflow-x: auto; } table { border-collapse: collapse; width: 100%; min-width: 650px; font-size: 12px; }
         th, td { border-bottom: 1px solid var(--divider-color); padding: 8px 6px; text-align: left; vertical-align: top; }
         .action { text-transform: capitalize; font-weight: 700; } tr.charge .action, .cost { color: #2196f3; } tr.discharge .action { color: #f57c00; }
+        tr.self_gen .action, .self-gen { color: #f57c00; } tr.idle .action, .idle { color: #7e57c2; }
         .saving { color: var(--success-color, #43a047); font-weight: 700; } .empty { color: var(--secondary-text-color); padding: 8px 0; }
         details { margin-top: 14px; } summary { cursor: pointer; font-weight: 600; }
         .rates { display: grid; grid-template-columns: repeat(8, minmax(54px, 1fr)); gap: 4px; margin-top: 8px; }
         .rate { background: var(--secondary-background-color); border-radius: 6px; padding: 5px; text-align: center; font-size: 10px; border-bottom: 3px solid transparent; }
-        .rate span, .rate strong { display: block; } .rate.charge { border-bottom-color: #2196f3; } .rate.discharge { border-bottom-color: #f57c00; }
+        .rate span, .rate strong { display: block; } .rate.charge { border-bottom-color: #2196f3; } .rate.discharge, .rate.self_gen { border-bottom-color: #f57c00; } .rate.idle { border-bottom-color: #7e57c2; }
         .rate.negative { background: #391cd9; color: white; } .rate.cheapest { background: #b9f6ca; color: #102a16; }
         .rate.cheap { background: #d7f5df; color: #12331d; } .rate.low { background: #dcedc8; color: #263b10; }
         .rate.medium { background: #ffe0b2; color: #472400; } .rate.high { background: #ffcdd2; color: #4a1015; }
@@ -283,9 +297,9 @@ class AferiyAgilePlanCard extends HTMLElement {
         @media (max-width: 700px) { .metrics { grid-template-columns: repeat(2, minmax(110px, 1fr)); } .rates { grid-template-columns: repeat(4, minmax(54px, 1fr)); } }
       </style>
       <h2>${this._escape(this.config.title || `${tariffName} Battery Plan`)}</h2>
-      <p class="subtitle">Today and tomorrow · price-aware planning${isCosy ? " · advisory Cosy plan" : control?.state === "on" ? " · automated control enabled" : " · shadow-only while control is off"}</p>
-      ${control ? `<div class="shadow-state"><strong>Automated control: ${this._escape(isCosy ? "Unavailable for Cosy" : control.state)} · ${this._escape(isCosy ? "Advisory plan only" : control.attributes?.status || "Waiting")}</strong><span>${this._escape(isCosy ? "The guarded control switch remains Agile-only" : control.attributes?.active_mode || "Self-Gen/Zero Export")} · ${this._escape(isCosy ? "Use the separate Overnight Charge selector for the fixed Cosy morning window" : control.attributes?.reason || "Use the Agile Automated Control entity to opt in")}</span></div>` : ""}
-      ${shadow ? `<div class="shadow-state"><strong>${this._escape(tariffName)} operating state: ${this._escape(shadow.state)}</strong><span>${!isCosy && control?.state === "on" ? "Using" : "Would use"} ${this._escape(shadow.attributes?.recommended_operating_mode || "Self-Gen/Zero Export")} · ${this._escape(shadow.attributes?.reason || "Waiting for a decision")}</span></div>` : ""}
+      <p class="subtitle">Today and tomorrow · price-aware planning${control?.state === "on" ? " · automated control enabled" : " · shadow-only while control is off"}</p>
+      ${control ? `<div class="shadow-state"><strong>Automated control: ${this._escape(control.state)} · ${this._escape(control.attributes?.status || "Waiting")}</strong><span>${this._escape(control.attributes?.active_mode || "Self-Gen/Zero Export")} · ${this._escape(control.attributes?.reason || "Use the Agile Automated Control entity to opt in")}</span></div>` : ""}
+      ${shadow ? `<div class="shadow-state"><strong>${this._escape(tariffName)} operating state: ${this._escape(shadow.state)}</strong><span>${control?.state === "on" ? "Using" : "Would use"} ${this._escape(shadow.attributes?.recommended_operating_mode || "Self-Gen/Zero Export")} · ${this._escape(shadow.attributes?.reason || "Waiting for a decision")}</span></div>` : ""}
       ${this._day(today, "Today")}
       ${this._day(tomorrow, "Tomorrow")}
     </ha-card>`;
