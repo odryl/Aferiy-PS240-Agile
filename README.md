@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.19-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.20-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe Octopus Agile battery planner and opt-in guarded automation.
@@ -52,7 +52,7 @@ You need:
 - Home Assistant 2024.8 or newer
 - HACS, unless installing manually
 - The static local IP address of the AFERIY master/coordinator
-- An Octopus Agile import tariff
+- An Octopus Agile or Cosy import tariff for the price-aware Proposed Plan
 - [BottlecapDave's Octopus Energy integration](https://github.com/BottlecapDave/HomeAssistant-OctopusEnergy)
   configured in Home Assistant
 
@@ -147,7 +147,7 @@ For a dedicated dashboard area, register this JavaScript module under
 **Settings → Dashboards → Resources**:
 
 ```text
-/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.19
+/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.20
 ```
 
 Then add **AFERIY Wi-Fi Loss Recovery** from the card picker, or use:
@@ -171,7 +171,7 @@ The integration creates generic `Battery 1 SOC`, `Battery 2 SOC`, and similar en
 
 After adding, removing, or replacing a battery/inverter, restart Home Assistant or reload the integration so the individual battery entity list is rebuilt from the master. The Battery Capacity preset does not control battery identification.
 
-## Connect Octopus Agile
+## Connect Octopus Agile or Cosy
 
 BottlecapDave's integration should provide event entities resembling:
 
@@ -184,13 +184,16 @@ Then:
 
 1. Open **Settings → Devices & services**.
 2. Open the AFERIY integration and select **Configure**.
-3. Enable **Octopus Agile Proposed Plan**.
+3. Enable **Octopus Rate Proposed Plan (Agile or Cosy)**.
 4. Select the current-day and next-day **import** rate event entities. Explicit
    selection is recommended even though a single import meter can be detected
    automatically.
 5. Set **Battery ready by** to `16:00`.
-6. Set **Protect household demand until** to `22:00`.
-7. Save. The integration reloads automatically.
+6. Set **Protect household demand until** to `22:00` for Agile, or `19:00`
+   for the official Cosy peak period.
+7. Select **Octopus Agile** or **Cosy Octopus** in the device's **Energy
+   Tariff** entity so the source tariff code is validated correctly.
+8. Save. The integration reloads automatically.
 
 Two sensors should appear:
 
@@ -242,7 +245,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.19`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.20`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 
@@ -457,10 +460,12 @@ The advanced estimate sensors are disabled by default because they can depend on
 
 Battery Capacity is an estimate input selected in 1.958 kWh module steps. It is used by the Agile charge/discharge plan and overnight energy calculations only. It does not limit the Battery N SOC sensors reported by the master. Set it to the actual number of installed modules before relying on an Agile plan.
 
-The Energy Tariff defaults to **Octopus Agile**. In Agile mode, the Proposed
-Plan uses the selected current-day and next-day Octopus rate events and the
-legacy fixed-window Smart Overnight scheduler is disabled. Custom Off-Peak
-Start/End controls are unavailable because those times do not apply to Agile.
+The Energy Tariff defaults to **Octopus Agile**. In Agile or Cosy mode, the
+Proposed Plan uses the selected current-day and next-day Octopus rate events.
+Agile disables the legacy fixed-window Smart Overnight scheduler. Cosy keeps
+its separate 04:00-07:00 scheduler available, while the price-aware Cosy plan
+on the Agile card remains advisory. Custom Off-Peak Start/End controls are
+available only with the Custom tariff preset.
 
 Fixed-window presets remain available for Cosy Octopus, Snug Octopus, Intelligent Octopus Go,
 Octopus Go, EDF GoElectric 35, British Gas EV Power+, E.ON Next Drive,
@@ -579,7 +584,7 @@ off-peak window and any SMART forecast/demand tuning that has been applied.
 To make it available in Home Assistant's card picker:
 
 1. Restart Home Assistant after installing or updating the integration.
-2. Add dashboard resource `/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.19`
+2. Add dashboard resource `/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.20`
    as a JavaScript module.
 3. Edit a dashboard, choose Add card, switch to By card, and search for
    `AFERIY Overnight Plan`.

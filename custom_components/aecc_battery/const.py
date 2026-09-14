@@ -138,6 +138,10 @@ TARIFF_CHEAP_WINDOWS: dict[str, tuple[tuple[str, str], ...]] = {
 TARIFF_PEAK_WINDOWS: dict[str, tuple[tuple[str, str], ...]] = {
     COSY_OCTOPUS_TARIFF_PRESET: (("16:00", "19:00"),),
 }
+OCTOPUS_RATE_PLAN_TARIFF_NAMES: dict[str, str] = {
+    OCTOPUS_AGILE_TARIFF_PRESET: "Octopus Agile",
+    COSY_OCTOPUS_TARIFF_PRESET: "Cosy Octopus",
+}
 
 # Polling
 POLL_INTERVAL = 5  # seconds – change this to update faster/slower

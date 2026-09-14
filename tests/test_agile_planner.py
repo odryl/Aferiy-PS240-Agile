@@ -624,6 +624,60 @@ def test_octopus_source_metadata_is_validated_behaviorally() -> None:
     )
 
 
+def test_cosy_octopus_source_metadata_is_accepted_for_cosy_planning() -> None:
+    cosy = {
+        "mpan": "1234567890123",
+        "serial_number": "meter-1",
+        "tariff_code": "E-1R-COSY-24-07-01-A",
+    }
+
+    assert AGILE.validate_octopus_rate_source(
+        "event.renamed_current_rates",
+        "octopus_energy",
+        cosy,
+        dict(cosy),
+        expected_tariff="cosy",
+    ) == []
+    assert AGILE.validate_octopus_rate_source(
+        "event.renamed_current_rates",
+        "octopus_energy",
+        cosy,
+        expected_tariff="agile",
+    )
+
+
+def test_cosy_half_hour_rates_produce_charge_and_peak_discharge_plan() -> None:
+    rates = _rates("2026-07-27", protected_rate=0.40)
+    local = ZoneInfo("Europe/London")
+    for rate in rates:
+        period = datetime.fromisoformat(str(rate["start"])).astimezone(local)
+        if 4 <= period.hour < 7 or 13 <= period.hour < 16 or period.hour >= 22:
+            rate["value_inc_vat"] = 0.10
+        elif 16 <= period.hour < 19:
+            rate["value_inc_vat"] = 0.40
+        else:
+            rate["value_inc_vat"] = 0.25
+
+    plan = AGILE.build_agile_day_plan(
+        rates,
+        timezone="Europe/London",
+        battery_capacity_kwh=5.874,
+        starting_soc=10,
+        reserve_soc=10,
+        expected_date=date(2026, 7, 27),
+        ready_by="16:00",
+        protected_until="19:00",
+    )
+
+    charge_slots = [slot for slot in plan["slots"] if slot["action"] == "charge"]
+    discharge_slots = [slot for slot in plan["slots"] if slot["action"] == "discharge"]
+    assert plan["status"] == "proposed"
+    assert charge_slots
+    assert discharge_slots
+    assert all(slot["rate_gbp_per_kwh"] == 0.10 for slot in charge_slots)
+    assert all("16:00" <= slot["local_start"] < "19:00" for slot in discharge_slots)
+
+
 def test_non_finite_battery_inputs_fail_safe() -> None:
     fields = {
         "battery_capacity_kwh": 5.874,

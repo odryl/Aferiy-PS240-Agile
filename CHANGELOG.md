@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.8.20
+
+- Extend the Octopus rate-source validator and Proposed Plan sensors to accept
+  matching Cosy current-day and next-day import-rate events when Cosy is the
+  selected Energy Tariff.
+- Reuse the validated half-hour optimizer to show Cosy prices and proposed
+  charge/discharge periods, costs, avoided import, and savings in the bundled
+  Agile card.
+- Make the card tariff-aware and clearly retain guarded automated control as
+  Agile-only; Cosy plans remain advisory, with the separate 04:00-07:00 fixed
+  scheduler available through Overnight Charge.
+
 ## 1.8.19
 
 - Add Cosy Octopus as an Energy Tariff option using the official 04:00-07:00

@@ -154,11 +154,11 @@ class AferiyAgilePlanCard extends HTMLElement {
     return "";
   }
 
-  _activeRows(slots) {
+  _activeRows(slots, tariffName) {
     const active = slots.filter((slot) => slot.action !== "hold");
     if (!active.length) return `<p class="empty">No charge or discharge periods are proposed.</p>`;
     return `<div class="table-wrap"><table>
-      <thead><tr><th>Time</th><th>Plan</th><th>Agile price</th><th>Energy</th><th>Power</th><th>Cost/value</th></tr></thead>
+      <thead><tr><th>Time</th><th>Plan</th><th>${this._escape(tariffName)} price</th><th>Energy</th><th>Power</th><th>Cost/value</th></tr></thead>
       <tbody>${active.map((slot) => `
         <tr class="${this._escape(slot.action)}">
           <td><strong>${this._escape(slot.local_start)}</strong></td>
@@ -171,10 +171,10 @@ class AferiyAgilePlanCard extends HTMLElement {
     </table></div>`;
   }
 
-  _rateTimeline(slots, cheapestRate, timelineKey) {
+  _rateTimeline(slots, cheapestRate, timelineKey, tariffName) {
     if (!slots.length) return "";
     const now = Date.now();
-    return `<details data-timeline="${this._escape(timelineKey)}"><summary>All half-hour Agile prices</summary><div class="rates">
+    return `<details data-timeline="${this._escape(timelineKey)}"><summary>All half-hour ${this._escape(tariffName)} prices</summary><div class="rates">
       ${slots.map((slot) => {
         const current = this._isCurrent(slot, now);
         const tone = this._priceTone(slot.rate_gbp_per_kwh, cheapestRate);
@@ -189,6 +189,7 @@ class AferiyAgilePlanCard extends HTMLElement {
   _day(state, label) {
     if (!state) return `<section><h3>${label}</h3><p>Waiting for the Proposed Plan sensor.</p></section>`;
     const attrs = state.attributes || {};
+    const tariffName = attrs.tariff_name || "Octopus Agile";
     const slots = attrs.slots || [];
     const statusClass = String(attrs.status || state.state).toLowerCase().replaceAll("_", "-");
     const conservativeTomorrow = attrs.starting_soc_source === "conservative_reserve_assumption";
@@ -209,7 +210,7 @@ class AferiyAgilePlanCard extends HTMLElement {
       ${rollingToday ? `<p class="notice rolling">Rolling horizon active: tonight's discharge is valued against published refill prices tomorrow.</p>` : ""}
       ${rollingTomorrow ? `<p class="notice rolling">Rolling horizon active: Tomorrow starts from Today's projected ${this._number(attrs.starting_soc, "%", 0)} SOC.</p>` : ""}
       <div class="metrics">
-        ${this._metric("Current Agile price", `${this._rate(currentRate)}/kWh`, "price")}
+        ${this._metric(`Current ${tariffName} price`, `${this._rate(currentRate)}/kWh`, "price")}
         ${this._metric("Cheapest remaining", `${this._rate(attrs.lowest_future_rate_gbp_per_kwh)}/kWh · ${cheapestStart}`, "price")}
         ${this._metric("Battery SOC", `${this._number(attrs.starting_soc, "%", 0)} → ${this._number(attrs.projected_soc_at_ready_by, "%", 0)}`, "soc")}
         ${this._metric(`SOC after protection`, this._number(attrs.projected_soc_at_protection_end, "%", 0), "soc")}
@@ -228,8 +229,8 @@ class AferiyAgilePlanCard extends HTMLElement {
         <span>Self-Gen house output ${this._number(attrs.max_system_discharge_power_w, " W", 0)}</span>
       </div>
       <h4>Charge and discharge schedule</h4>
-      ${this._activeRows(slots)}
-      ${this._rateTimeline(slots, cheapestRate, label.toLowerCase())}
+      ${this._activeRows(slots, tariffName)}
+      ${this._rateTimeline(slots, cheapestRate, label.toLowerCase(), tariffName)}
       <p class="footnote">${this._escape(attrs.cost_estimate_note || "Costs are estimates, not a complete electricity bill.")}</p>
     </section>`;
   }
@@ -241,6 +242,10 @@ class AferiyAgilePlanCard extends HTMLElement {
       if (details.open) this._openTimelines.add(details.dataset.timeline);
       else this._openTimelines.delete(details.dataset.timeline);
     });
+    const tariffName = today?.attributes?.tariff_name
+      || tomorrow?.attributes?.tariff_name
+      || "Octopus Agile";
+    const isCosy = tariffName === "Cosy Octopus";
     this.innerHTML = `<ha-card>
       <style>
         ha-card { padding: 16px; overflow: hidden; }
@@ -277,10 +282,10 @@ class AferiyAgilePlanCard extends HTMLElement {
         .footnote { margin-top: 12px; font-size: 11px; }
         @media (max-width: 700px) { .metrics { grid-template-columns: repeat(2, minmax(110px, 1fr)); } .rates { grid-template-columns: repeat(4, minmax(54px, 1fr)); } }
       </style>
-      <h2>${this._escape(this.config.title || "Octopus Agile Battery Plan")}</h2>
-      <p class="subtitle">Today and tomorrow · guarded Agile planning${control?.state === "on" ? " · automated control enabled" : " · shadow-only while control is off"}</p>
-      ${control ? `<div class="shadow-state"><strong>Automated control: ${this._escape(control.state)} · ${this._escape(control.attributes?.status || "Waiting")}</strong><span>${this._escape(control.attributes?.active_mode || "Self-Gen/Zero Export")} · ${this._escape(control.attributes?.reason || "Use the Agile Automated Control entity to opt in")}</span></div>` : ""}
-      ${shadow ? `<div class="shadow-state"><strong>Agile operating state: ${this._escape(shadow.state)}</strong><span>${control?.state === "on" ? "Using" : "Would use"} ${this._escape(shadow.attributes?.recommended_operating_mode || "Self-Gen/Zero Export")} · ${this._escape(shadow.attributes?.reason || "Waiting for a decision")}</span></div>` : ""}
+      <h2>${this._escape(this.config.title || `${tariffName} Battery Plan`)}</h2>
+      <p class="subtitle">Today and tomorrow · price-aware planning${isCosy ? " · advisory Cosy plan" : control?.state === "on" ? " · automated control enabled" : " · shadow-only while control is off"}</p>
+      ${control ? `<div class="shadow-state"><strong>Automated control: ${this._escape(isCosy ? "Unavailable for Cosy" : control.state)} · ${this._escape(isCosy ? "Advisory plan only" : control.attributes?.status || "Waiting")}</strong><span>${this._escape(isCosy ? "The guarded control switch remains Agile-only" : control.attributes?.active_mode || "Self-Gen/Zero Export")} · ${this._escape(isCosy ? "Use the separate Overnight Charge selector for the fixed Cosy morning window" : control.attributes?.reason || "Use the Agile Automated Control entity to opt in")}</span></div>` : ""}
+      ${shadow ? `<div class="shadow-state"><strong>${this._escape(tariffName)} operating state: ${this._escape(shadow.state)}</strong><span>${!isCosy && control?.state === "on" ? "Using" : "Would use"} ${this._escape(shadow.attributes?.recommended_operating_mode || "Self-Gen/Zero Export")} · ${this._escape(shadow.attributes?.reason || "Waiting for a decision")}</span></div>` : ""}
       ${this._day(today, "Today")}
       ${this._day(tomorrow, "Tomorrow")}
     </ha-card>`;
@@ -299,6 +304,6 @@ customElements.define("aferiy-agile-plan-card", AferiyAgilePlanCard);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "aferiy-agile-plan-card",
-  name: "AFERIY Agile Battery Plan",
-  description: "View Octopus Agile plans and guarded automated-control status.",
+  name: "AFERIY Octopus Battery Plan",
+  description: "View Octopus Agile or Cosy rates, plans, and control status.",
 });

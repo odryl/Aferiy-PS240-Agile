@@ -25,6 +25,8 @@ def test_sensor_applies_behavioral_source_validator_and_stale_guard() -> None:
     assert "validate_octopus_rate_source(" in SENSOR_SOURCE
     assert "registry_entry.platform" in SENSOR_SOURCE
     assert 'timedelta(hours=36)' in SENSOR_SOURCE
+    assert "expected_tariff=self._tariff_family()" in SENSOR_SOURCE
+    assert 'return "cosy" if self._tariff_preset()' in SENSOR_SOURCE
 
 
 def test_sensor_waits_for_unpublished_rate_events_without_invalidating_the_other_day() -> None:
@@ -111,7 +113,7 @@ def test_card_discovers_entities_and_exposes_energy_costs_and_savings() -> None:
     assert '"_agile_proposed_plan_today"' in CARD_SOURCE
     assert '"_agile_proposed_plan_tomorrow"' in CARD_SOURCE
     assert '"_agile_shadow_operating_state"' in CARD_SOURCE
-    assert "Agile operating state" in CARD_SOURCE
+    assert "operating state:" in CARD_SOURCE
     assert "slot.rate_gbp_per_kwh" in CARD_SOURCE
     assert "slot.energy_kwh" in CARD_SOURCE
     assert "slot.duration_minutes" in CARD_SOURCE
@@ -126,7 +128,10 @@ def test_card_discovers_entities_and_exposes_energy_costs_and_savings() -> None:
     assert "mediumlimit" in CARD_SOURCE
     assert "highlimit" in CARD_SOURCE
     assert "rate.current" in CARD_SOURCE
-    assert "All half-hour Agile prices" in CARD_SOURCE
+    assert "All half-hour ${this._escape(tariffName)} prices" in CARD_SOURCE
+    assert 'attrs.tariff_name || "Octopus Agile"' in CARD_SOURCE
+    assert 'tariffName === "Cosy Octopus"' in CARD_SOURCE
+    assert "Advisory plan only" in CARD_SOURCE
     assert "Rolling horizon active" in CARD_SOURCE
     assert "Battery SOC starts below reserve" in CARD_SOURCE
     assert "projected_soc_at_protection_end" in CARD_SOURCE

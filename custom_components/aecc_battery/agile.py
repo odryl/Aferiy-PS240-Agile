@@ -23,8 +23,9 @@ def validate_octopus_rate_source(
     platform: str | None,
     attributes: Mapping[str, Any],
     counterpart_attributes: Mapping[str, Any] | None = None,
+    expected_tariff: str = "agile",
 ) -> list[str]:
-    """Return reasons an event cannot be trusted as an Agile import source."""
+    """Return reasons an event cannot be trusted as an Octopus import source."""
     errors: list[str] = []
     if not entity_id.startswith("event."):
         errors.append("The selected rate source is not an event entity.")
@@ -36,8 +37,11 @@ def validate_octopus_rate_source(
         if not str(attributes.get(attribute) or "").strip():
             errors.append(f"The rate source is missing required {attribute} metadata.")
     tariff_code = str(attributes.get("tariff_code") or "")
-    if tariff_code and "AGILE" not in tariff_code.upper():
-        errors.append("The selected import tariff is not an Octopus Agile tariff.")
+    expected_marker = "COSY" if expected_tariff.lower() == "cosy" else "AGILE"
+    if tariff_code and expected_marker not in tariff_code.upper():
+        errors.append(
+            f"The selected import tariff is not an Octopus {expected_marker.title()} tariff."
+        )
 
     if counterpart_attributes is not None:
         for attribute in _REQUIRED_SOURCE_ATTRIBUTES:

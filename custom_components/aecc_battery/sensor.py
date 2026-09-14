@@ -50,6 +50,7 @@ from .const import (
     CONF_OFF_PEAK_END,
     CONF_OFF_PEAK_START,
     CONF_TARIFF_PRESET,
+    COSY_OCTOPUS_TARIFF_PRESET,
     DEFAULT_AGILE_PLANNER_ENABLED,
     DEFAULT_AGILE_PROTECTED_UNTIL,
     DEFAULT_AGILE_READY_BY,
@@ -57,6 +58,7 @@ from .const import (
     DEFAULT_OFF_PEAK_START,
     DEFAULT_TARIFF_PRESET,
     DOMAIN,
+    OCTOPUS_RATE_PLAN_TARIFF_NAMES,
 )
 from .coordinator import AeccBatteryCoordinator
 
@@ -719,9 +721,15 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
     def extra_state_attributes(self) -> dict[str, Any]:
         source = self._source_entity_id()
         plan = self._plan()
+        tariff_preset = self._tariff_preset()
         return {
             "source_entity": source,
             "day": self._day_kind,
+            "tariff_preset": tariff_preset,
+            "tariff_name": OCTOPUS_RATE_PLAN_TARIFF_NAMES.get(
+                tariff_preset,
+                "Octopus Agile",
+            ),
             **plan,
         }
 
@@ -736,6 +744,21 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
 
     def _source_suffix(self) -> str:
         return "_current_day_rates" if self._day_kind == "current" else "_next_day_rates"
+
+    def _tariff_preset(self) -> str:
+        return str(
+            getattr(
+                self.coordinator,
+                "smart_tariff_preset",
+                self._config_entry.options.get(
+                    CONF_TARIFF_PRESET,
+                    DEFAULT_TARIFF_PRESET,
+                ),
+            )
+        )
+
+    def _tariff_family(self) -> str:
+        return "cosy" if self._tariff_preset() == COSY_OCTOPUS_TARIFF_PRESET else "agile"
 
     def _configured_source_entity_id(self) -> str | None:
         key = (
@@ -847,6 +870,7 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
             registry_entry.platform if registry_entry is not None else None,
             state.attributes,
             counterpart_attributes,
+            expected_tariff=self._tariff_family(),
         )
         if source_errors:
             return self._invalid_plan(" ".join(source_errors), source_errors)
@@ -926,6 +950,7 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
         )
         cache_key = (
             source,
+            self._tariff_preset(),
             state.last_updated,
             counterpart.last_updated if counterpart_rates is not None else None,
             round(starting_soc, 1),
@@ -975,6 +1000,11 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
                 ).isoformat(),
             }
         plan["starting_soc_source"] = starting_soc_source
+        plan["tariff_preset"] = self._tariff_preset()
+        plan["tariff_name"] = OCTOPUS_RATE_PLAN_TARIFF_NAMES.get(
+            self._tariff_preset(),
+            "Octopus Agile",
+        )
         plan["tariff_code"] = state.attributes.get("tariff_code")
         plan["mpan"] = state.attributes.get("mpan")
         plan["rates_updated_at"] = state.last_updated.isoformat()
