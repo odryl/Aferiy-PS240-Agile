@@ -61,6 +61,9 @@ class AferiyOvernightPlanCard extends HTMLElement {
     const needed = this._numberText(plannedNeed, 3, "kWh");
     const status = this._overnightStatusText(overnightCharge, overnightStatus);
     const tariff = this._tariffLabel(hass, attrs);
+    const cosySchedule = attrs.tariff_preset === "cosy_octopus"
+      ? "Cheap 04:00-07:00, 13:00-16:00, 22:00-00:00 · Peak 16:00-19:00"
+      : "";
     const solarMode = this._solarMode(solarAvailability, attrs);
     const demand = this._numberText(
       breakdown.projected_house_demand_kwh,
@@ -266,6 +269,7 @@ class AferiyOvernightPlanCard extends HTMLElement {
 
         <div class="explain">
           <div><b>Target:</b> ${this._escape(target)}</div>
+          ${cosySchedule ? `<div><b>Cosy rate bands:</b> ${this._escape(cosySchedule)}</div>` : ""}
           <div><b>Battery capacity:</b> ${this._escape(batteryCapacity)}${Number.isFinite(usableCapacity) ? ` - (${this._escape(this._numberText(usableCapacity, 2, "kWh"))} Usable)` : ""}</div>
           <div><b>Day balance:</b> ${this._escape(demand)} demand · ${this._escape(solar)} solar${wholeShortfall ? ` · ${this._escape(wholeShortfall)} shortfall` : ""}</div>
           <div><b>Battery need:</b> ${this._escape(requiredNeed)} peak deficit${losses ? ` · ${this._escape(losses)} losses` : ""} · ${this._escape(buffer)} buffer</div>
@@ -336,6 +340,24 @@ class AferiyOvernightPlanCard extends HTMLElement {
     ));
     if (free) {
       return "Free";
+    }
+
+    if (attrs.tariff_preset === "cosy_octopus") {
+      const now = new Date();
+      const current = (now.getHours() * 60) + now.getMinutes();
+      const inBand = (start, end) => (
+        start < end
+          ? current >= start && current < end
+          : current >= start || current < end
+      );
+      const cheap = [[240, 420], [780, 960], [1320, 0]];
+      if (cheap.some(([start, end]) => inBand(start, end))) {
+        return "Cosy · Cheap";
+      }
+      if (inBand(960, 1140)) {
+        return "Cosy · Peak";
+      }
+      return "Cosy · Day";
     }
 
     const start = this._timeEntityMinutes(hass, "_off_peak_start")

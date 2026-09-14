@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.18-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.19-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe Octopus Agile battery planner and opt-in guarded automation.
@@ -26,6 +26,7 @@ compatible. This fork appears in Home Assistant as **AFERIY PS240 Agile**.
 - Manual charge, discharge, idle, and self-consumption controls
 - Experimental Feed mode with a passive Base Feed Power target
 - Local-first automatic overnight charging with smart or manual SOC targets
+- Cosy Octopus support with all three cheap periods and the daily peak shown on the dashboard
 - Charge and discharge SOC limits
 - Existing local manual controls inherited from the upstream integration
 - PV surplus charge trigger for systems with unmanaged microinverters
@@ -146,7 +147,7 @@ For a dedicated dashboard area, register this JavaScript module under
 **Settings → Dashboards → Resources**:
 
 ```text
-/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.18
+/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.19
 ```
 
 Then add **AFERIY Wi-Fi Loss Recovery** from the card picker, or use:
@@ -241,7 +242,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.18`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.19`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 
@@ -461,13 +462,20 @@ Plan uses the selected current-day and next-day Octopus rate events and the
 legacy fixed-window Smart Overnight scheduler is disabled. Custom Off-Peak
 Start/End controls are unavailable because those times do not apply to Agile.
 
-Fixed-window presets remain available for Snug Octopus, Intelligent Octopus Go,
+Fixed-window presets remain available for Cosy Octopus, Snug Octopus, Intelligent Octopus Go,
 Octopus Go, EDF GoElectric 35, British Gas EV Power+, E.ON Next Drive,
 British Gas Standard E7, EDF E7 Fixed, OVO Simpler Energy E7, Octopus E7,
 and E.ON Next Pumped Fixed. If your tariff uses different cheap-rate hours,
 choose Custom and set the start and end times manually in 24-hour `HH:MM`
 format. These times are used only by the inherited fixed-window overnight target
 and Pre-Sunrise Need calculations.
+
+Cosy Octopus is represented using its three local-time cheap periods:
+`04:00-07:00`, `13:00-16:00`, and `22:00-00:00`, plus its `16:00-19:00`
+peak period. The dashboard labels the current band as Cosy Cheap, Peak, or Day.
+Because the existing automatic feature calculates an overnight target for the
+following day, automatic battery charging uses the `04:00-07:00` morning dip.
+Regional and fixed/variable Cosy unit prices are not hard-coded.
 
 The external helper checkboxes are reminders for installers. They do not install or validate integrations. Smart estimates look for standard Solcast forecast files and sensors and use `zone.home` for home occupancy. Battery control and the overnight target use the configured tariff window and AECC grid reading; Shelly comparison remains diagnostic only.
 
@@ -571,7 +579,7 @@ off-peak window and any SMART forecast/demand tuning that has been applied.
 To make it available in Home Assistant's card picker:
 
 1. Restart Home Assistant after installing or updating the integration.
-2. Add dashboard resource `/aecc_battery_static/aferiy-overnight-plan-card.js`
+2. Add dashboard resource `/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.19`
    as a JavaScript module.
 3. Edit a dashboard, choose Add card, switch to By card, and search for
    `AFERIY Overnight Plan`.

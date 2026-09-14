@@ -41,6 +41,7 @@ def test_current_uk_tariff_windows() -> None:
 
     assert presets == {
         "octopus_agile": ("23:30", "05:30"),
+        "cosy_octopus": ("04:00", "07:00"),
         "snug_octopus": ("00:30", "06:30"),
         "octopus_intelligent_go": ("23:30", "05:30"),
         "octopus_go": ("23:30", "05:30"),
@@ -62,6 +63,34 @@ def test_tariff_labels_cover_every_preset() -> None:
     labels = constants["TARIFF_PRESET_LABELS"]
 
     assert labels.keys() == presets.keys()
+
+
+def test_cosy_octopus_exposes_all_off_peak_and_peak_bands() -> None:
+    constants = _constants()
+
+    assert constants["TARIFF_CHEAP_WINDOWS"]["cosy_octopus"] == (
+        ("04:00", "07:00"),
+        ("13:00", "16:00"),
+        ("22:00", "00:00"),
+    )
+    assert constants["TARIFF_PEAK_WINDOWS"]["cosy_octopus"] == (
+        ("16:00", "19:00"),
+    )
+
+
+def test_cosy_dashboard_identifies_cheap_peak_and_day_bands() -> None:
+    frontend = (
+        ROOT
+        / "custom_components"
+        / "aecc_battery"
+        / "frontend"
+        / "aferiy-overnight-plan-card.js"
+    ).read_text()
+
+    assert 'attrs.tariff_preset === "cosy_octopus"' in frontend
+    assert 'return "Cosy · Cheap"' in frontend
+    assert 'return "Cosy · Peak"' in frontend
+    assert 'return "Cosy · Day"' in frontend
 
 
 def test_octopus_agile_is_the_default_tariff() -> None:

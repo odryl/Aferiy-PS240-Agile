@@ -35,6 +35,7 @@ DEFAULT_TIMEOUT = 5  # seconds
 DEFAULT_OFF_PEAK_START = "23:30"
 DEFAULT_OFF_PEAK_END = "05:30"
 OCTOPUS_AGILE_TARIFF_PRESET = "octopus_agile"
+COSY_OCTOPUS_TARIFF_PRESET = "cosy_octopus"
 DEFAULT_TARIFF_PRESET = OCTOPUS_AGILE_TARIFF_PRESET
 OVERNIGHT_CHARGE_MODE_DISABLED = "disabled"
 OVERNIGHT_CHARGE_MODE_SMART = "smart"
@@ -88,6 +89,9 @@ TARIFF_PRESETS: dict[str, tuple[str, str]] = {
     # Agile is dynamic: this compatibility window is never used by the fixed-
     # window overnight scheduler, which is interlocked while Agile is selected.
     OCTOPUS_AGILE_TARIFF_PRESET: (DEFAULT_OFF_PEAK_START, DEFAULT_OFF_PEAK_END),
+    # The morning dip is the primary window used by the overnight battery
+    # target. All three Cosy dips are exposed separately below for dashboards.
+    COSY_OCTOPUS_TARIFF_PRESET: ("04:00", "07:00"),
     "snug_octopus": ("00:30", "06:30"),
     "octopus_intelligent_go": (DEFAULT_OFF_PEAK_START, DEFAULT_OFF_PEAK_END),
     "octopus_go": ("23:30", "05:30"),
@@ -103,6 +107,9 @@ TARIFF_PRESETS: dict[str, tuple[str, str]] = {
 }
 TARIFF_PRESET_LABELS: dict[str, str] = {
     OCTOPUS_AGILE_TARIFF_PRESET: "Octopus Agile (dynamic rates; Proposed Plan)",
+    COSY_OCTOPUS_TARIFF_PRESET: (
+        "Cosy Octopus (04:00-07:00, 13:00-16:00, 22:00-00:00)"
+    ),
     "snug_octopus": "Snug Octopus (00:30-06:30)",
     "octopus_intelligent_go": "Intelligent Octopus Go (23:30-05:30)",
     "octopus_go": "Octopus Go (23:30-05:30)",
@@ -115,6 +122,21 @@ TARIFF_PRESET_LABELS: dict[str, str] = {
     "octopus_e7": "Octopus E7 (00:30-07:30)",
     "eon_next_pumped_fixed": "E.ON Next Pumped Fixed (22:00-06:00)",
     "custom": "Custom/manual times",
+}
+
+# Fixed local-clock rate bands used for display and tariff-aware behaviour.
+# Cosy unit prices vary by region and product version, so the integration does
+# not hard-code p/kWh values. The primary morning dip in TARIFF_PRESETS remains
+# the sole window used by the existing overnight charge-to-target algorithm.
+TARIFF_CHEAP_WINDOWS: dict[str, tuple[tuple[str, str], ...]] = {
+    COSY_OCTOPUS_TARIFF_PRESET: (
+        ("04:00", "07:00"),
+        ("13:00", "16:00"),
+        ("22:00", "00:00"),
+    ),
+}
+TARIFF_PEAK_WINDOWS: dict[str, tuple[tuple[str, str], ...]] = {
+    COSY_OCTOPUS_TARIFF_PRESET: (("16:00", "19:00"),),
 }
 
 # Polling

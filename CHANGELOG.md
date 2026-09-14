@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.19
+
+- Add Cosy Octopus as an Energy Tariff option using the official 04:00-07:00
+  morning dip for the overnight charge-to-target scheduler.
+- Expose all three Cosy cheap periods and the 16:00-19:00 peak period as tariff
+  attributes, and show the current Cosy Cheap, Peak, or Day band on the bundled
+  Overnight Plan dashboard card without hard-coding regional unit prices.
+
 ## 1.8.18
 
 - Keep the Wi-Fi recovery regression tests independent of Home Assistant's

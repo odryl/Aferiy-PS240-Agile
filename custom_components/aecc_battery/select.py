@@ -18,6 +18,7 @@ from .const import (
     CONF_ADVANCED_ENERGY_SENSORS,
     CONF_AGILE_PLANNER_ENABLED,
     CONF_TARIFF_PRESET,
+    COSY_OCTOPUS_TARIFF_PRESET,
     DEFAULT_AGILE_PLANNER_ENABLED,
     DEFAULT_BATTERY_CAPACITY_KWH,
     DEFAULT_CHARGE_POWER_W,
@@ -33,6 +34,8 @@ from .const import (
     OVERNIGHT_CHARGE_MODE_DISABLED,
     OVERNIGHT_CHARGE_MODE_FROM_LABEL,
     OVERNIGHT_CHARGE_MODE_LABELS,
+    TARIFF_CHEAP_WINDOWS,
+    TARIFF_PEAK_WINDOWS,
     TARIFF_PRESET_LABELS,
     TARIFF_PRESETS,
     battery_capacity_for_modules,
@@ -57,6 +60,7 @@ CAPACITY_PRESET_OPTIONS = [
 OVERNIGHT_CHARGE_MODE_OPTIONS = list(OVERNIGHT_CHARGE_MODE_LABELS.values())
 TARIFF_PRESET_SHORT_LABELS = {
     OCTOPUS_AGILE_TARIFF_PRESET: "Octopus Agile",
+    COSY_OCTOPUS_TARIFF_PRESET: "Cosy Octopus",
     "snug_octopus": "Snug Octopus",
     "octopus_intelligent_go": "Intelligent Octopus Go",
     "octopus_go": "Octopus Go",
@@ -618,7 +622,7 @@ class AeccSmartTariffPresetSelect(
                 ),
             }
         start, end = self._window_for_preset(preset)
-        return {
+        attributes = {
             "preset": preset,
             "preset_label": TARIFF_PRESET_LABELS.get(preset),
             "off_peak_start": start,
@@ -630,6 +634,26 @@ class AeccSmartTariffPresetSelect(
                 "Self-Gen/Zero Export 5 minutes before it ends."
             ),
         }
+        if preset == COSY_OCTOPUS_TARIFF_PRESET:
+            attributes.update(
+                {
+                    "cheap_rate_windows": [
+                        {"start": window_start, "end": window_end}
+                        for window_start, window_end in TARIFF_CHEAP_WINDOWS[preset]
+                    ],
+                    "peak_rate_windows": [
+                        {"start": window_start, "end": window_end}
+                        for window_start, window_end in TARIFF_PEAK_WINDOWS[preset]
+                    ],
+                    "scheduler_window": {"start": start, "end": end},
+                    "note": (
+                        "Cosy has three cheap periods. The overnight battery target "
+                        "uses the 04:00-07:00 morning dip; the dashboard also shows "
+                        "the 13:00-16:00 and 22:00-00:00 dips and 16:00-19:00 peak."
+                    ),
+                }
+            )
+        return attributes
 
     async def async_select_option(self, option: str) -> None:
         if option not in TARIFF_PRESET_FROM_LABEL:
