@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.26-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.27-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe Octopus Agile battery planner and opt-in guarded automation.
@@ -149,7 +149,7 @@ For a dedicated dashboard area, register this JavaScript module under
 **Settings → Dashboards → Resources**:
 
 ```text
-/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.26
+/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.27
 ```
 
 Then add **AFERIY Wi-Fi Loss Recovery** from the card picker, or use:
@@ -245,7 +245,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.26`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.27`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 
@@ -307,7 +307,7 @@ from the AFERIY device, such as:
 - Grid Import/Export
 - Agile Automated Control (Agile only; keep Off until deliberately testing)
 - Cosy Automated Control (Cosy only; keep Off until deliberately testing)
-- Cosy Daylight Flex (optional 13:00-16:00 solar-aware Self-Gen)
+- Cosy Daylight Flex (optional 13:00-16:00 PV-first, just-in-time charging)
 - Connection Status
 
 The separate **AFERIY Overnight Plan** card describes the inherited
@@ -370,11 +370,11 @@ of changing to Idle. The dashboard shows the effective available power and
 whether it came from live measurement or the configured estimate.
 
 For Cosy, the separate persistent **Cosy Daylight Flex** switch can let the
-battery use CT-controlled Self-Gen during the 13:00-16:00 cheap period while
-at least 100 W of live solar is present. It continuously checks live SOC,
-battery capacity, charge efficiency, and the remaining time before 16:00. It
-keeps one full 30-minute cheap-rate charging slot in reserve and switches to
-Charge as soon as the configured Charge Limit would otherwise be at risk.
+battery remain Idle during the spare part of the 13:00-16:00 cheap period, so
+any available PV can charge it without being discarded. It continuously checks
+live SOC, battery capacity, charge efficiency, and the remaining time before
+16:00. It switches to 1,200 W AC Charge only at the latest safe start needed to
+reach the configured Charge Limit, including a two-minute command margin.
 
 The PS240 schedule is recurring rather than date-specific. Commands are
 therefore restricted to the current half-hour and Home Assistant clears them
@@ -498,10 +498,10 @@ Cosy Octopus uses Charge-to-target during its three local-time cheap periods:
 `04:00-07:00`, `13:00-16:00`, and `22:00-00:00`. It uses CT-controlled
 Self-Gen/Zero Export between those windows: `00:00-04:00`, `07:00-13:00`, and
 `16:00-22:00`. At target SOC, a cheap period holds Idle. During the
-afternoon cheap period, **Cosy Daylight Flex** can use Self-Gen while useful
-live PV and enough target catch-up time remain. The dashboard displays every
-phase, its validated price, and the current catch-up margin. Regional Cosy unit
-prices are not hard-coded.
+afternoon cheap period, **Cosy Daylight Flex** can wait in Idle for PV while
+enough target catch-up time remains, then use 1,200 W AC Charge only from the
+latest safe start. The dashboard displays every phase, its validated price, and
+the current catch-up margin. Regional Cosy unit prices are not hard-coded.
 
 The Cosy target is calculated separately for each cheap period using the
 configured battery capacity and discharge reserve. It budgets a maximum 850 W
@@ -613,7 +613,7 @@ off-peak window and any SMART forecast/demand tuning that has been applied.
 To make it available in Home Assistant's card picker:
 
 1. Restart Home Assistant after installing or updating the integration.
-2. Add dashboard resource `/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.26`
+2. Add dashboard resource `/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.27`
    as a JavaScript module.
 3. Edit a dashboard, choose Add card, switch to By card, and search for
    `AFERIY Overnight Plan`.

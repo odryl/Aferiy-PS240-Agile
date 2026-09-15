@@ -761,7 +761,7 @@ def test_cosy_shadow_charges_holds_and_self_generates_by_tariff_phase() -> None:
     assert decision("self_gen")["recommended_operating_mode"] == "Self-Gen/Zero Export"
 
 
-def test_cosy_daylight_flex_uses_self_gen_only_with_safe_catch_up_time() -> None:
+def test_cosy_daylight_flex_waits_for_pv_until_latest_safe_charge_time() -> None:
     plan = {
         "status": "proposed",
         "target_soc": 90,
@@ -800,26 +800,27 @@ def test_cosy_daylight_flex_uses_self_gen_only_with_safe_catch_up_time() -> None
         80,
         500,
     )
-    assert early["state"] == "Cosy Daylight Flex"
-    assert early["recommended_operating_mode"] == "Self-Gen/Zero Export"
+    assert early["state"] == "Cosy Solar Wait"
+    assert early["recommended_operating_mode"] == "Idle"
     assert early["required_charge_minutes"] == 32.6
-    assert early["daylight_flex_margin_minutes"] == 117.4
+    assert early["daylight_flex_margin_minutes"] == 145.4
 
     late = decision(
-        datetime(2026, 7, 27, 15, 15, tzinfo=ZoneInfo("Europe/London")),
+        datetime(2026, 7, 27, 15, 30, tzinfo=ZoneInfo("Europe/London")),
         80,
         500,
     )
     assert late["state"] == "Planned Charge"
     assert late["recommended_operating_mode"] == "Charge"
-    assert late["daylight_flex_margin_minutes"] == -17.6
+    assert late["daylight_flex_margin_minutes"] == -4.6
 
     no_solar = decision(
         datetime(2026, 7, 27, 13, 0, tzinfo=ZoneInfo("Europe/London")),
         80,
         0,
     )
-    assert no_solar["recommended_operating_mode"] == "Charge"
+    assert no_solar["state"] == "Cosy Solar Wait"
+    assert no_solar["recommended_operating_mode"] == "Idle"
 
     disabled = decision(
         datetime(2026, 7, 27, 13, 0, tzinfo=ZoneInfo("Europe/London")),
@@ -828,9 +829,54 @@ def test_cosy_daylight_flex_uses_self_gen_only_with_safe_catch_up_time() -> None
         enabled=False,
     )
     assert disabled["recommended_operating_mode"] == "Charge"
-    assert AGILE.agile_control_mode_for_state(
-        "Cosy Daylight Flex", "Self-Gen/Zero Export"
-    ) == "Self-Gen/Zero Export"
+    assert AGILE.agile_control_mode_for_state("Cosy Solar Wait", "Idle") == "Idle"
+
+
+def test_cosy_daylight_flex_delays_400wh_deficit_until_last_half_hour() -> None:
+    plan = {
+        "status": "proposed",
+        "target_soc": 90,
+        "battery_capacity_kwh": 4.0,
+        "charge_efficiency": 0.90,
+        "max_system_charge_power_w": 1200,
+        "tariff_strategy": "cosy_fixed_daily_schedule",
+        "slots": [],
+    }
+
+    def decision(now: datetime) -> dict[str, object]:
+        return AGILE.build_agile_shadow_decision(
+            plan,
+            now=now,
+            connection_fresh=True,
+            soc_percent=80,
+            reserve_soc=20,
+            pv_power_w=0,
+            total_charge_power_w=0,
+            ac_charge_power_w=0,
+            pv_quiet_minutes=0,
+            locked_action={
+                "action": "charge",
+                "tariff_phase": "cheap_charge",
+                "slot_target_soc": 90,
+                "start": now.isoformat(),
+                "end": (now + timedelta(minutes=30)).isoformat(),
+                "command_power_limit_w": 1200,
+                "duration_minutes": 30,
+            },
+            cosy_daylight_flex_enabled=True,
+        )
+
+    before_latest_start = decision(datetime(2026, 7, 27, 15, 30, tzinfo=ZoneInfo("Europe/London")))
+    assert before_latest_start["stored_charge_deficit_kwh"] == 0.4
+    assert before_latest_start["required_charge_minutes"] == 22.2
+    assert before_latest_start["state"] == "Cosy Solar Wait"
+    assert before_latest_start["recommended_operating_mode"] == "Idle"
+    latest_start = datetime.fromisoformat(str(before_latest_start["latest_grid_charge_start"]))
+    assert (latest_start.hour, latest_start.minute) == (15, 35)
+
+    after_latest_start = decision(datetime(2026, 7, 27, 15, 36, tzinfo=ZoneInfo("Europe/London")))
+    assert after_latest_start["state"] == "Planned Charge"
+    assert after_latest_start["recommended_operating_mode"] == "Charge"
 
 
 def test_available_pv_prevents_target_hold_when_it_can_cover_house_load() -> None:

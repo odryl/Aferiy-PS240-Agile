@@ -18,8 +18,7 @@ _PLANNER_REVISION = 3
 _SHADOW_DECISION_REVISION = 1
 _COSY_SCHEDULE_REVISION = 3
 _COSY_MAX_BATTERY_OUTPUT_W = 850
-_COSY_DAYLIGHT_FLEX_SOLAR_THRESHOLD_W = 100
-_COSY_DAYLIGHT_FLEX_SAFETY_MINUTES = 30
+_COSY_DAYLIGHT_FLEX_COMMAND_MARGIN_MINUTES = 2
 
 
 def validate_octopus_rate_source(
@@ -611,9 +610,7 @@ def apply_cosy_rate_schedule(
     raw_slots = scheduled.get("slots", [])
     expected_periods = scheduled.get("expected_rate_period_count")
     if not isinstance(raw_slots, list) or len(raw_slots) != expected_periods:
-        return _invalid_plan(
-            "Cosy control requires a complete local day of consecutive half-hour prices."
-        )
+        return _invalid_plan("Cosy control requires a complete local day of consecutive half-hour prices.")
     try:
         local_zone = ZoneInfo(str(scheduled["timezone"]))
         local_day = date.fromisoformat(str(scheduled["date"]))
@@ -636,9 +633,7 @@ def apply_cosy_rate_schedule(
         or periods[-1][1].astimezone(UTC) != day_end
         or any(previous[1] != current[0] for previous, current in pairwise(periods))
     ):
-        return _invalid_plan(
-            "Cosy control requires a complete local day of consecutive half-hour prices."
-        )
+        return _invalid_plan("Cosy control requires a complete local day of consecutive half-hour prices.")
 
     try:
         capacity_kwh = float(scheduled["battery_capacity_kwh"])
@@ -893,11 +888,7 @@ def build_agile_shadow_decision(
             **target_hold_attrs,
             **action_attrs,
         )
-    cosy_daylight_slot = bool(
-        cosy_schedule
-        and action.get("tariff_phase") == "cheap_charge"
-        and 13 <= now.hour < 16
-    )
+    cosy_daylight_slot = bool(cosy_schedule and action.get("tariff_phase") == "cheap_charge" and 13 <= now.hour < 16)
     if action_name == "charge" and cosy_daylight_slot:
         deadline = now.replace(hour=16, minute=0, second=0, microsecond=0)
         remaining_cheap_minutes = max(0.0, (deadline - now).total_seconds() / 60)
@@ -929,17 +920,22 @@ def build_agile_shadow_decision(
             required_charge_minutes = None
             flex_inputs_valid = False
         flex_margin_minutes = (
-            remaining_cheap_minutes
-            - float(required_charge_minutes)
-            - _COSY_DAYLIGHT_FLEX_SAFETY_MINUTES
+            remaining_cheap_minutes - float(required_charge_minutes) - _COSY_DAYLIGHT_FLEX_COMMAND_MARGIN_MINUTES
+            if flex_inputs_valid and required_charge_minutes is not None
+            else None
+        )
+        latest_grid_charge_start = (
+            deadline - timedelta(minutes=(float(required_charge_minutes) + _COSY_DAYLIGHT_FLEX_COMMAND_MARGIN_MINUTES))
             if flex_inputs_valid and required_charge_minutes is not None
             else None
         )
         flex_attrs = {
             "cosy_daylight_flex_enabled": bool(cosy_daylight_flex_enabled),
             "cosy_daylight_flex_deadline": deadline.isoformat(),
-            "cosy_daylight_flex_solar_threshold_w": _COSY_DAYLIGHT_FLEX_SOLAR_THRESHOLD_W,
-            "cosy_daylight_flex_safety_minutes": _COSY_DAYLIGHT_FLEX_SAFETY_MINUTES,
+            "cosy_daylight_flex_command_margin_minutes": (_COSY_DAYLIGHT_FLEX_COMMAND_MARGIN_MINUTES),
+            "latest_grid_charge_start": (
+                latest_grid_charge_start.isoformat() if latest_grid_charge_start is not None else None
+            ),
             "remaining_cheap_minutes": round(remaining_cheap_minutes, 1),
             "required_charge_minutes": (
                 round(float(required_charge_minutes), 1) if required_charge_minutes is not None else None
@@ -951,30 +947,17 @@ def build_agile_shadow_decision(
                 round(float(flex_margin_minutes), 1) if flex_margin_minutes is not None else None
             ),
         }
-        meaningful_solar = (
-            max(
-                0.0,
-                pv_power_w,
-                inferred_pv_charge_w,
-                float(available_pv_power_w)
-                if isinstance(available_pv_power_w, int | float)
-                and isfinite(float(available_pv_power_w))
-                else 0.0,
-            )
-            >= _COSY_DAYLIGHT_FLEX_SOLAR_THRESHOLD_W
-        )
         if (
             cosy_daylight_flex_enabled
-            and meaningful_solar
             and flex_inputs_valid
             and flex_margin_minutes is not None
             and flex_margin_minutes >= 0
         ):
             return result(
-                "Cosy Daylight Flex",
-                "Self-Gen/Zero Export",
-                "Useful daylight is present and enough cheap-rate charging time remains to reach the 16:00 target.",
-                charge_inhibited_reason="daylight_flex_headroom",
+                "Cosy Solar Wait",
+                "Idle",
+                "Enough cheap-rate time remains to wait for PV and still reach the Charge Limit by 16:00.",
+                charge_inhibited_reason="waiting_for_latest_safe_charge",
                 **flex_attrs,
                 **action_attrs,
             )
@@ -984,7 +967,7 @@ def build_agile_shadow_decision(
             (
                 "Daylight Flex is off; charge during the cheap period to protect the 16:00 target."
                 if not cosy_daylight_flex_enabled
-                else "Charge now because useful solar or sufficient cheap-rate catch-up time is unavailable."
+                else "Charge now because the latest safe start needed to reach the 16:00 Charge Limit has arrived."
             ),
             **flex_attrs,
             **action_attrs,
@@ -1087,7 +1070,7 @@ def agile_control_mode_for_state(
     """Return the only automated mode permitted for a validated decision state."""
     if state == "Planned Charge" and recommended_mode == "Charge":
         return "Charge"
-    if state in {"Post-solar Hold", "Cosy Cheap Hold"} and recommended_mode == "Idle":
+    if state in {"Post-solar Hold", "Cosy Cheap Hold", "Cosy Solar Wait"} and recommended_mode == "Idle":
         return "Idle"
     if (
         state

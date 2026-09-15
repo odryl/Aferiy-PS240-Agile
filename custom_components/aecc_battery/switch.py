@@ -532,7 +532,7 @@ class AeccCosyAutomaticControlSwitch(AeccAgileAutomaticControlSwitch):
 
 
 class AeccCosyDaylightFlexSwitch(CoordinatorEntity[AeccBatteryCoordinator], SwitchEntity):
-    """Allow guarded daytime Self-Gen when the Cosy target remains reachable."""
+    """Delay daytime grid charging while the Cosy target remains reachable."""
 
     _attr_has_entity_name = True
     _attr_name = "Cosy Daylight Flex"
@@ -559,27 +559,22 @@ class AeccCosyDaylightFlexSwitch(CoordinatorEntity[AeccBatteryCoordinator], Swit
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             "applies_during": "13:00-16:00 Cosy cheap period",
-            "solar_threshold_w": 100,
-            "catch_up_safety_minutes": 30,
+            "command_margin_minutes": 2,
             "control_policy": (
-                "Use Self-Gen only while useful live solar is present and the configured "
-                "Charge Limit remains reachable before 16:00 at the guarded charge rate."
+                "Hold Idle to accept any PV while the configured Charge Limit remains "
+                "reachable, then use 1,200 W AC charging from the latest safe start."
             ),
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         self.coordinator.cosy_daylight_flex_enabled = True
-        await self.coordinator.async_save_runtime_preferences(
-            cosy_daylight_flex_enabled=True
-        )
+        await self.coordinator.async_save_runtime_preferences(cosy_daylight_flex_enabled=True)
         self.coordinator.async_update_listeners()
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self.coordinator.cosy_daylight_flex_enabled = False
-        await self.coordinator.async_save_runtime_preferences(
-            cosy_daylight_flex_enabled=False
-        )
+        await self.coordinator.async_save_runtime_preferences(cosy_daylight_flex_enabled=False)
         self.coordinator.async_update_listeners()
         self.async_write_ha_state()
 

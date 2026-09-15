@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.8.27
+
+- Change **Cosy Daylight Flex** to remain Idle while the live Charge Limit
+  deficit can still be recovered before 16:00, allowing any available PV to
+  charge the battery instead of requiring a solar threshold or using Self-Gen.
+- Recalculate the latest safe 1,200 W AC-charge start from live SOC, capacity,
+  and charge efficiency on every update. Use only a two-minute command margin
+  instead of reserving an entire 30-minute cheap-rate slot.
+- Expose the calculated latest grid-charge start and add a regression case for
+  a 400 Wh deficit: at 90% efficiency it waits until approximately 15:36 before
+  AC charging, unless intervening PV delays or removes the remaining need.
+
 ## 1.8.26
 
 - Add an optional **Available PV power entity** setting for a live inverter
