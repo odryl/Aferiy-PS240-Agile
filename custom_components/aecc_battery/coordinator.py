@@ -197,6 +197,7 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.agile_control_enabled: bool = False
         self.agile_control_pending_restore: bool = False
         self.agile_controller: Any | None = None
+        self.cosy_controller: Any | None = None
         self.wifi_loss_recovery_enabled: bool = False
         self.wifi_loss_recovery_grace_period_minutes: int = (
             WIFI_LOSS_RECOVERY_DEFAULT_GRACE_MINUTES
@@ -704,9 +705,9 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_shutdown(self) -> None:
         """Cancel integration-owned background work before unloading."""
-        controller = self.agile_controller
-        if controller is not None:
-            await controller.async_shutdown()
+        for controller in (self.agile_controller, self.cosy_controller):
+            if controller is not None:
+                await controller.async_shutdown()
         wifi_recovery_controller = self.wifi_loss_recovery_controller
         if wifi_recovery_controller is not None:
             await wifi_recovery_controller.async_shutdown()

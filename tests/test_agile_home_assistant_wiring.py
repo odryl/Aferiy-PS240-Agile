@@ -150,10 +150,10 @@ def test_shadow_state_machine_is_registered_and_remains_view_only() -> None:
 def test_agile_control_is_explicit_guarded_and_recoverable() -> None:
     assert "AeccAgileAutomaticControlSwitch" in SWITCH_SOURCE
     assert "self._enabled = False" in SWITCH_SOURCE
-    assert 'self._attr_unique_id = f"{config_entry.entry_id}_agile_automatic_control"' in SWITCH_SOURCE
+    assert 'unique_suffix: str = "agile_automatic_control"' in SWITCH_SOURCE
     assert "_AGILE_CONFIRM_POLLS = 2" in SWITCH_SOURCE
     assert "agile_control_mode_for_state(" in SWITCH_SOURCE
-    assert 'operation_prefix="agile_control"' in SWITCH_SOURCE
+    assert 'operation_prefix: str = "agile_control"' in SWITCH_SOURCE
     assert "async_set_agile_control_pending_restore(True)" in SWITCH_SOURCE
     assert '"recovery_marker_failed"' in SWITCH_SOURCE
     assert "async_restore_self_consumption()" in SWITCH_SOURCE
@@ -164,12 +164,21 @@ def test_agile_control_is_explicit_guarded_and_recoverable() -> None:
     assert "agile_control_command_errors(" in COORDINATOR_SOURCE
     assert "_async_disable_agile_control" in SELECT_SOURCE
     assert "COSY_OCTOPUS_TARIFF_PRESET" in SWITCH_SOURCE
+    assert "AeccCosyAutomaticControlSwitch" in SWITCH_SOURCE
+    assert 'unique_suffix="cosy_automatic_control"' in SWITCH_SOURCE
+    assert 'operation_prefix="cosy_control"' in SWITCH_SOURCE
+    assert "coordinator.cosy_controller" in SWITCH_SOURCE
 
 
 def test_agile_card_surfaces_but_does_not_silently_enable_control() -> None:
     assert '"_agile_automated_control"' in CARD_SOURCE
-    assert "Automated control:" in CARD_SOURCE
+    assert "automated control:" in CARD_SOURCE
     assert "callService" not in CARD_SOURCE
+    assert '"_cosy_automated_control"' in CARD_SOURCE
+    assert '"Cosy Automated Control"' in CARD_SOURCE
+    assert "slot_target_soc" in CARD_SOURCE
+    assert "required_cover_kwh" in CARD_SOURCE
+    assert "Capacity shortfall" in CARD_SOURCE
 
 
 def test_midnight_rate_entity_rollover_is_a_waiting_state() -> None:

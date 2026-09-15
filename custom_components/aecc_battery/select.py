@@ -92,9 +92,12 @@ async def _async_disable_agile_control(
     reason: str,
 ) -> None:
     """Ensure explicit manual/scheduler intent supersedes Agile automation."""
-    controller = getattr(coordinator, "agile_controller", None)
-    if controller is not None and getattr(controller, "is_on", False):
-        await controller.async_disable(reason)
+    for controller in (
+        getattr(coordinator, "agile_controller", None),
+        getattr(coordinator, "cosy_controller", None),
+    ):
+        if controller is not None and getattr(controller, "is_on", False):
+            await controller.async_disable(reason)
 
 
 async def async_setup_entry(
@@ -654,7 +657,12 @@ class AeccSmartTariffPresetSelect(
             return
 
         preset = TARIFF_PRESET_FROM_LABEL[option]
-        if preset != OCTOPUS_AGILE_TARIFF_PRESET:
+        current_preset = getattr(
+            self.coordinator,
+            "smart_tariff_preset",
+            self._selected_preset,
+        )
+        if preset != current_preset:
             await _async_disable_agile_control(
                 self.coordinator,
                 f"tariff plan changed: {option}",

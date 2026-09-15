@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from itertools import pairwise
-from math import isfinite
+from math import ceil, isfinite
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -16,7 +16,8 @@ _DEFAULT_MINIMUM_SAVING_GBP_PER_KWH = 0.03
 _REQUIRED_SOURCE_ATTRIBUTES = ("mpan", "serial_number", "tariff_code")
 _PLANNER_REVISION = 3
 _SHADOW_DECISION_REVISION = 1
-_COSY_SCHEDULE_REVISION = 1
+_COSY_SCHEDULE_REVISION = 2
+_COSY_MAX_BATTERY_OUTPUT_W = 850
 
 
 def validate_octopus_rate_source(
@@ -590,7 +591,11 @@ def build_agile_day_plan(
     }
 
 
-def apply_cosy_rate_schedule(plan: Mapping[str, Any]) -> dict[str, Any]:
+def apply_cosy_rate_schedule(
+    plan: Mapping[str, Any],
+    *,
+    max_battery_output_w: int = _COSY_MAX_BATTERY_OUTPUT_W,
+) -> dict[str, Any]:
     """Apply Cosy's fixed daily operating phases to a validated rate plan.
 
     Cheap periods are armed for charging to the configured target. The live
@@ -633,6 +638,29 @@ def apply_cosy_rate_schedule(plan: Mapping[str, Any]) -> dict[str, Any]:
             "Cosy control requires a complete local day of consecutive half-hour prices."
         )
 
+    try:
+        capacity_kwh = float(scheduled["battery_capacity_kwh"])
+        reserve_soc = float(scheduled["reserve_soc"])
+        configured_target_soc = float(scheduled.get("target_soc", 100.0))
+        max_output_w = int(max_battery_output_w)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return _invalid_plan("Cosy control could not validate the battery energy limits.")
+    if (
+        not all(isfinite(value) for value in (capacity_kwh, reserve_soc, configured_target_soc))
+        or capacity_kwh <= 0
+        or not 0 <= reserve_soc <= configured_target_soc <= 100
+        or max_output_w <= 0
+    ):
+        return _invalid_plan("Cosy control received unsafe battery energy limits.")
+    max_output_per_slot_kwh = max_output_w / 1000 * 0.5
+
+    def cheap_period_cover(minute: int) -> tuple[int, str]:
+        if 240 <= minute < 420:
+            return 12, "13:00"
+        if 780 <= minute < 960:
+            return 12, "22:00"
+        return 8, "04:00 next day"
+
     slots: list[dict[str, Any]] = []
     phase_counts = {"cheap_charge": 0, "overnight_idle": 0, "self_gen": 0}
     for raw_slot in scheduled.get("slots", []):
@@ -649,6 +677,14 @@ def apply_cosy_rate_schedule(plan: Mapping[str, Any]) -> dict[str, Any]:
         if 240 <= minute < 420 or 780 <= minute < 960 or 1320 <= minute:
             action = "charge"
             phase = "cheap_charge"
+            cover_slots, cover_until = cheap_period_cover(minute)
+            required_cover_kwh = cover_slots * max_output_per_slot_kwh
+            required_target_soc = min(
+                configured_target_soc,
+                float(ceil(reserve_soc + required_cover_kwh / capacity_kwh * 100)),
+            )
+            maximum_usable_kwh = capacity_kwh * max(0.0, configured_target_soc - reserve_soc) / 100
+            cover_shortfall_kwh = max(0.0, required_cover_kwh - maximum_usable_kwh)
             command_power_limit_w = int(
                 scheduled.get("max_system_charge_power_w") or _SAFE_AGILE_CHARGE_POWER_CEILING_W
             )
@@ -687,6 +723,16 @@ def apply_cosy_rate_schedule(plan: Mapping[str, Any]) -> dict[str, Any]:
                 "duration_minutes": duration_minutes,
             }
         )
+        if phase == "cheap_charge":
+            slot.update(
+                {
+                    "slot_target_soc": round(required_target_soc, 1),
+                    "cover_until": cover_until,
+                    "cover_periods": cover_slots,
+                    "required_cover_kwh": round(required_cover_kwh, 3),
+                    "cover_shortfall_kwh": round(cover_shortfall_kwh, 3),
+                }
+            )
         slots.append(slot)
 
     scheduled.update(
@@ -701,12 +747,16 @@ def apply_cosy_rate_schedule(plan: Mapping[str, Any]) -> dict[str, Any]:
             "economic_plan_reason": scheduled.get("reason"),
             "tariff_strategy": "cosy_fixed_daily_schedule",
             "tariff_schedule_revision": _COSY_SCHEDULE_REVISION,
+            "cosy_max_battery_output_w": max_output_w,
+            "cosy_max_battery_output_per_half_hour_kwh": round(max_output_per_slot_kwh, 3),
             "scheduled_charge_periods": phase_counts["cheap_charge"],
             "scheduled_idle_periods": phase_counts["overnight_idle"],
             "scheduled_self_gen_periods": phase_counts["self_gen"],
             "schedule_note": (
-                "Cheap periods request Charge only while SOC is below target; at target "
-                "they hold Idle. Useful solar always keeps Self-Gen active."
+                "Each cheap period charges only to the SOC needed to cover the next "
+                f"non-cheap block at up to {max_output_w} W ("
+                f"{max_output_per_slot_kwh:.3f} kWh per half-hour); otherwise it holds Idle. "
+                "Useful solar always keeps Self-Gen active."
             ),
             "slots": slots,
         }
@@ -782,14 +832,15 @@ def build_agile_shadow_decision(
         "planned_slot_energy_kwh": action.get("energy_kwh"),
         "planned_slot_power_limit_w": action.get("command_power_limit_w"),
         "planned_slot_duration_minutes": action.get("duration_minutes"),
-        "target_soc": plan.get("target_soc"),
+        "target_soc": action.get("slot_target_soc", plan.get("target_soc")),
+        "plan_target_soc": plan.get("target_soc"),
         "tariff_strategy": plan.get("tariff_strategy"),
         "tariff_phase": action.get("tariff_phase"),
     }
 
     inferred_pv_charge_w = max(0.0, total_charge_power_w - ac_charge_power_w)
     solar_active = max(0.0, pv_power_w) >= 50 or inferred_pv_charge_w >= 50
-    target_soc = plan.get("target_soc")
+    target_soc = action.get("slot_target_soc", plan.get("target_soc"))
     target_reached = bool(
         isinstance(target_soc, int | float) and isfinite(float(target_soc)) and soc_percent >= float(target_soc) - 0.5
     )

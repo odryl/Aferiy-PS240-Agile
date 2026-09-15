@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.8.22
+
+- Add a separate opt-in **Cosy Automated Control** switch, leaving the Agile
+  toggle restricted to Agile and preventing the two controllers from running
+  together.
+- Size each Cosy cheap-period SOC target from the configured battery capacity,
+  reserve, and a conservative maximum battery supply of 850 W (0.425 kWh per
+  half-hour) until the next cheap period. Charge only below that target;
+  otherwise hold Idle.
+- Show the calculated Charge/Idle target, maximum-output assumption, required
+  cover, and any physical capacity shortfall on the Cosy plan while preserving
+  the existing live-PV, topology, bounded-command, and restart safeguards.
+
 ## 1.8.21
 
 - Replace Cosy's generic Agile optimisation with a fixed daily operating plan:

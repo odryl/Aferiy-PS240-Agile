@@ -34,7 +34,7 @@ from .linksys_jnap import LinksysJnapError
 from .wifi_recovery import WifiLossRecoveryController
 
 _LOGGER = logging.getLogger(__name__)
-_AGILE_CONTROLLER_REVISION = 1
+_AGILE_CONTROLLER_REVISION = 2
 _AGILE_CONFIRM_POLLS = 2
 
 
@@ -48,6 +48,7 @@ async def async_setup_entry(
         [
             AeccAutomaticDataloggerRestartSwitch(coordinator, config_entry),
             AeccAgileAutomaticControlSwitch(coordinator, config_entry),
+            AeccCosyAutomaticControlSwitch(coordinator, config_entry),
             AeccWifiLossRecoverySwitch(coordinator, config_entry),
         ]
     )
@@ -125,17 +126,28 @@ class AeccAgileAutomaticControlSwitch(CoordinatorEntity[AeccBatteryCoordinator],
         self,
         coordinator: AeccBatteryCoordinator,
         config_entry: ConfigEntry,
+        *,
+        tariff_preset: str = OCTOPUS_AGILE_TARIFF_PRESET,
+        control_label: str = "Agile",
+        unique_suffix: str = "agile_automatic_control",
+        coordinator_attribute: str = "agile_controller",
+        operation_prefix: str = "agile_control",
     ) -> None:
         super().__init__(coordinator)
         self._config_entry = config_entry
-        self._attr_unique_id = f"{config_entry.entry_id}_agile_automatic_control"
+        self._required_tariff_preset = tariff_preset
+        self._control_label = control_label
+        self._coordinator_attribute = coordinator_attribute
+        self._operation_prefix = operation_prefix
+        self._attr_name = f"{control_label} Automated Control"
+        self._attr_unique_id = f"{config_entry.entry_id}_{unique_suffix}"
         self._enabled = False
         self._owns_control = False
         self._active_mode = "Self-Gen/Zero Export"
         self._active_slot_start: str | None = None
         self._active_slot_end: str | None = None
         self._status = "Off"
-        self._reason = "Automatic Agile control is off. Shadow planning remains active."
+        self._reason = f"Automatic {control_label} control is off. Shadow planning remains active."
         self._last_command: str | None = None
         self._last_command_at: datetime | None = None
         self._last_command_result: str | None = None
@@ -164,6 +176,7 @@ class AeccAgileAutomaticControlSwitch(CoordinatorEntity[AeccBatteryCoordinator],
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
             "controller_revision": _AGILE_CONTROLLER_REVISION,
+            "tariff_preset": self._required_tariff_preset,
             "beta": True,
             "status": self._status,
             "reason": self._reason,
@@ -183,13 +196,13 @@ class AeccAgileAutomaticControlSwitch(CoordinatorEntity[AeccBatteryCoordinator],
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        self.coordinator.agile_controller = self
+        setattr(self.coordinator, self._coordinator_attribute, self)
         self.async_on_remove(self.hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_state_changed))
 
     async def async_will_remove_from_hass(self) -> None:
         await self.async_shutdown()
-        if self.coordinator.agile_controller is self:
-            self.coordinator.agile_controller = None
+        if getattr(self.coordinator, self._coordinator_attribute, None) is self:
+            setattr(self.coordinator, self._coordinator_attribute, None)
         await super().async_will_remove_from_hass()
 
     @callback
@@ -200,7 +213,7 @@ class AeccAgileAutomaticControlSwitch(CoordinatorEntity[AeccBatteryCoordinator],
             and not self.coordinator.agile_control_pending_restore
         ):
             self._status = "Off"
-            self._reason = "Interrupted Agile control was restored to Self-Gen after reconnect."
+            self._reason = f"Interrupted {self._control_label} control was restored to Self-Gen after reconnect."
             self._owns_control = False
             self._active_mode = "Self-Gen/Zero Export"
             self._active_slot_start = None
@@ -234,11 +247,8 @@ class AeccAgileAutomaticControlSwitch(CoordinatorEntity[AeccBatteryCoordinator],
             DEFAULT_AGILE_PLANNER_ENABLED,
         ):
             return "The Octopus rate planner is disabled in integration options."
-        if self.coordinator.smart_tariff_preset not in (
-            OCTOPUS_AGILE_TARIFF_PRESET,
-            COSY_OCTOPUS_TARIFF_PRESET,
-        ):
-            return "The tariff preset is not Octopus Agile or Cosy."
+        if self.coordinator.smart_tariff_preset != self._required_tariff_preset:
+            return f"The tariff preset is not Octopus {self._control_label}."
         if self.coordinator.overnight_charging_mode != OVERNIGHT_CHARGE_MODE_DISABLED:
             return "The fixed-window overnight scheduler must be Off."
         if self.coordinator.storage_topology_incomplete:
@@ -298,7 +308,7 @@ class AeccAgileAutomaticControlSwitch(CoordinatorEntity[AeccBatteryCoordinator],
         try:
             success = await self.coordinator.async_restore_self_consumption()
         except Exception as exc:
-            _LOGGER.exception("Guarded Agile Self-Gen restore failed unexpectedly")
+            _LOGGER.exception("Guarded %s Self-Gen restore failed unexpectedly", self._control_label)
             success = False
             restore_exception = type(exc).__name__
         self._last_command = "restore_self_gen"
@@ -371,10 +381,10 @@ class AeccAgileAutomaticControlSwitch(CoordinatorEntity[AeccBatteryCoordinator],
                 charge_soc=charge_soc,
                 slot_start=start.strftime("%H:%M"),
                 slot_end=end.strftime("%H:%M"),
-                operation_prefix="agile_control",
+                operation_prefix=self._operation_prefix,
             )
         except Exception as exc:
-            _LOGGER.exception("Guarded Agile command failed unexpectedly")
+            _LOGGER.exception("Guarded %s command failed unexpectedly", self._control_label)
             success = False
             command_exception = type(exc).__name__
         self._last_command = f"{mode.lower()} {start.strftime('%H:%M')}-{end.strftime('%H:%M')}"
@@ -384,7 +394,7 @@ class AeccAgileAutomaticControlSwitch(CoordinatorEntity[AeccBatteryCoordinator],
         )
         if not success:
             self._owns_control = True
-            await self._async_restore_self_gen("The Agile command was not confirmed.")
+            await self._async_restore_self_gen(f"The {self._control_label} command was not confirmed.")
             return
         self._owns_control = True
         self._active_mode = mode
@@ -429,6 +439,13 @@ class AeccAgileAutomaticControlSwitch(CoordinatorEntity[AeccBatteryCoordinator],
             self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        other_controller = (
+            self.coordinator.cosy_controller
+            if self._required_tariff_preset == OCTOPUS_AGILE_TARIFF_PRESET
+            else self.coordinator.agile_controller
+        )
+        if other_controller is not None and getattr(other_controller, "is_on", False):
+            await other_controller.async_disable(f"{self._control_label} control enabled")
         async with self._evaluation_lock:
             if self._enabled:
                 return
@@ -451,21 +468,32 @@ class AeccAgileAutomaticControlSwitch(CoordinatorEntity[AeccBatteryCoordinator],
             self._enabled = True
             self.coordinator.agile_control_enabled = True
             self._status = "Armed"
-            self._reason = "Waiting for a confirmed guarded Agile decision."
-            _LOGGER.warning("Guarded beta Agile automated control enabled")
+            self._reason = f"Waiting for a confirmed guarded {self._control_label} decision."
+            _LOGGER.warning("Guarded beta %s automated control enabled", self._control_label)
         await self._async_evaluate()
 
     async def async_disable(self, reason: str) -> None:
         async with self._evaluation_lock:
             was_enabled = self._enabled
             self._enabled = False
-            self.coordinator.agile_control_enabled = False
-            await self._async_restore_self_gen(f"Agile control disabled: {reason}.")
+            other_controller = (
+                self.coordinator.cosy_controller
+                if self._required_tariff_preset == OCTOPUS_AGILE_TARIFF_PRESET
+                else self.coordinator.agile_controller
+            )
+            self.coordinator.agile_control_enabled = bool(
+                other_controller is not None and getattr(other_controller, "is_on", False)
+            )
+            await self._async_restore_self_gen(f"{self._control_label} control disabled: {reason}.")
             self._status = "Off" if not self.coordinator.agile_control_pending_restore else "Restore pending"
             if not self.coordinator.agile_control_pending_restore:
-                self._reason = f"Automatic Agile control is off: {reason}."
+                self._reason = f"Automatic {self._control_label} control is off: {reason}."
             if was_enabled:
-                _LOGGER.warning("Guarded beta Agile automated control disabled: %s", reason)
+                _LOGGER.warning(
+                    "Guarded beta %s automated control disabled: %s",
+                    self._control_label,
+                    reason,
+                )
             self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -481,6 +509,25 @@ class AeccAgileAutomaticControlSwitch(CoordinatorEntity[AeccBatteryCoordinator],
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         self._evaluation_task = None
+
+
+class AeccCosyAutomaticControlSwitch(AeccAgileAutomaticControlSwitch):
+    """Separate opt-in executor for the guarded Cosy operating schedule."""
+
+    def __init__(
+        self,
+        coordinator: AeccBatteryCoordinator,
+        config_entry: ConfigEntry,
+    ) -> None:
+        super().__init__(
+            coordinator,
+            config_entry,
+            tariff_preset=COSY_OCTOPUS_TARIFF_PRESET,
+            control_label="Cosy",
+            unique_suffix="cosy_automatic_control",
+            coordinator_attribute="cosy_controller",
+            operation_prefix="cosy_control",
+        )
 
 
 class AeccAutomaticDataloggerRestartSwitch(CoordinatorEntity[AeccBatteryCoordinator], SwitchEntity):

@@ -686,6 +686,16 @@ def test_cosy_half_hour_rates_produce_fixed_daily_operating_schedule() -> None:
     assert all(
         "07:00" <= slot["local_start"] < "13:00" or "16:00" <= slot["local_start"] < "22:00" for slot in self_gen_slots
     )
+    morning = next(slot for slot in charge_slots if slot["local_start"] == "04:00")
+    afternoon = next(slot for slot in charge_slots if slot["local_start"] == "13:00")
+    evening = next(slot for slot in charge_slots if slot["local_start"] == "22:00")
+    assert morning["slot_target_soc"] == 97.0
+    assert afternoon["slot_target_soc"] == 97.0
+    assert evening["slot_target_soc"] == 68.0
+    assert morning["required_cover_kwh"] == 5.1
+    assert evening["required_cover_kwh"] == 3.4
+    assert plan["cosy_max_battery_output_w"] == 850
+    assert plan["cosy_max_battery_output_per_half_hour_kwh"] == 0.425
 
 
 def test_cosy_shadow_charges_holds_and_self_generates_by_tariff_phase() -> None:
@@ -736,6 +746,42 @@ def test_cosy_schedule_rejects_incomplete_late_day_rates() -> None:
     cosy_plan = AGILE.apply_cosy_rate_schedule(economic_plan)
     assert cosy_plan["status"] == "invalid"
     assert "complete local day" in cosy_plan["reason"]
+
+
+def test_cosy_slot_target_uses_live_soc_and_configured_battery_capacity() -> None:
+    economic_plan = AGILE.build_agile_day_plan(
+        _rates("2026-07-27"),
+        timezone="Europe/London",
+        battery_capacity_kwh=1.958,
+        starting_soc=70,
+        reserve_soc=10,
+        expected_date=date(2026, 7, 27),
+    )
+    plan = AGILE.apply_cosy_rate_schedule(economic_plan)
+    slot = next(slot for slot in plan["slots"] if slot["local_start"] == "22:00")
+    assert slot["slot_target_soc"] == 100.0
+    assert slot["cover_shortfall_kwh"] == 1.638
+
+    now = datetime.fromisoformat(slot["start"]).astimezone(ZoneInfo("Europe/London"))
+
+    def decision(soc: float) -> dict[str, object]:
+        return AGILE.build_agile_shadow_decision(
+            plan,
+            now=now,
+            connection_fresh=True,
+            soc_percent=soc,
+            reserve_soc=10,
+            pv_power_w=0,
+            total_charge_power_w=0,
+            ac_charge_power_w=0,
+            pv_quiet_minutes=30,
+            locked_action=slot,
+        )
+
+    assert decision(99)["recommended_operating_mode"] == "Charge"
+    held = decision(100)
+    assert held["recommended_operating_mode"] == "Idle"
+    assert held["target_soc"] == 100.0
 
 
 def test_non_finite_battery_inputs_fail_safe() -> None:

@@ -45,7 +45,10 @@ class AferiyAgilePlanCard extends HTMLElement {
     const today = this._find(this.config.today_entity, "_agile_proposed_plan_today", "Agile Proposed Plan Today");
     const tomorrow = this._find(this.config.tomorrow_entity, "_agile_proposed_plan_tomorrow", "Agile Proposed Plan Tomorrow");
     const shadow = this._find(this.config.shadow_entity, "_agile_shadow_operating_state", "Agile Shadow Operating State");
-    const control = this._findSwitch(this.config.control_entity, "_agile_automated_control", "Agile Automated Control");
+    const isCosy = (today?.attributes?.tariff_name || tomorrow?.attributes?.tariff_name) === "Cosy Octopus";
+    const control = isCosy
+      ? this._findSwitch(this.config.cosy_control_entity, "_cosy_automated_control", "Cosy Automated Control")
+      : this._findSwitch(this.config.control_entity, "_agile_automated_control", "Agile Automated Control");
     const signature = JSON.stringify([
       today?.entity_id,
       today?.state,
@@ -145,6 +148,10 @@ class AferiyAgilePlanCard extends HTMLElement {
 
   _slotValue(slot) {
     if (slot.action === "charge") {
+      if (slot.tariff_phase === "cheap_charge") {
+        const shortfall = Number(slot.cover_shortfall_kwh);
+        return `<span class="cost">Cover ${this._number(slot.required_cover_kwh, " kWh", 2)} to ${this._escape(slot.cover_until || "next cheap period")}${Number.isFinite(shortfall) && shortfall > 0 ? `<br><strong>Capacity shortfall ${this._number(shortfall, " kWh", 2)}</strong>` : ""}</span>`;
+      }
       return Number(slot.energy_kwh) > 0
         ? `<span class="cost">Cost ${this._money(slot.charge_cost_gbp)}</span>`
         : `<span class="cost">Charge to target</span>`;
@@ -158,7 +165,11 @@ class AferiyAgilePlanCard extends HTMLElement {
     return "";
   }
 
-  _actionLabel(action) {
+  _actionLabel(action, slot = {}) {
+    if (slot.tariff_phase === "cheap_charge") {
+      const target = Number(slot.slot_target_soc);
+      return Number.isFinite(target) ? `Charge / Idle to ${target.toFixed(0)}%` : "Charge / Idle";
+    }
     if (action === "self_gen") return "Self-Gen/Zero Export";
     if (action === "idle") return "Idle";
     if (action === "charge") return "Charge";
@@ -174,7 +185,7 @@ class AferiyAgilePlanCard extends HTMLElement {
       <tbody>${active.map((slot) => `
         <tr class="${this._escape(slot.action)}">
           <td><strong>${this._escape(slot.local_start)}</strong></td>
-          <td><span class="action">${this._escape(this._actionLabel(slot.action))}</span></td>
+          <td><span class="action">${this._escape(this._actionLabel(slot.action, slot))}</span></td>
           <td>${this._rate(slot.rate_gbp_per_kwh)}/kWh</td>
           <td>${this._number(slot.energy_kwh, " kWh", 3)}</td>
           <td>${this._number(slot.power_w, " W", 0)} avg<br><small>≤${this._number(slot.command_power_limit_w, " W", 0)} · ${this._number(slot.duration_minutes, " min", 1)}</small></td>
@@ -190,7 +201,7 @@ class AferiyAgilePlanCard extends HTMLElement {
       ${slots.map((slot) => {
         const current = this._isCurrent(slot, now);
         const tone = this._priceTone(slot.rate_gbp_per_kwh, cheapestRate);
-        const title = `${slot.local_start}: ${this._rate(slot.rate_gbp_per_kwh)}/kWh · ${this._actionLabel(slot.action)}${current ? " · current period" : ""}`;
+        const title = `${slot.local_start}: ${this._rate(slot.rate_gbp_per_kwh)}/kWh · ${this._actionLabel(slot.action, slot)}${current ? " · current period" : ""}`;
         return `<div class="rate ${this._escape(slot.action)} ${this._escape(tone)} ${current ? "current" : ""}" title="${this._escape(title)}">
         <span>${current ? "Now · " : ""}${this._escape(slot.local_start)}</span><strong>${this._rate(slot.rate_gbp_per_kwh)}</strong>
       </div>`;
@@ -298,7 +309,7 @@ class AferiyAgilePlanCard extends HTMLElement {
       </style>
       <h2>${this._escape(this.config.title || `${tariffName} Battery Plan`)}</h2>
       <p class="subtitle">Today and tomorrow · price-aware planning${control?.state === "on" ? " · automated control enabled" : " · shadow-only while control is off"}</p>
-      ${control ? `<div class="shadow-state"><strong>Automated control: ${this._escape(control.state)} · ${this._escape(control.attributes?.status || "Waiting")}</strong><span>${this._escape(control.attributes?.active_mode || "Self-Gen/Zero Export")} · ${this._escape(control.attributes?.reason || "Use the Agile Automated Control entity to opt in")}</span></div>` : ""}
+      ${control ? `<div class="shadow-state"><strong>${this._escape(isCosy ? "Cosy" : "Agile")} automated control: ${this._escape(control.state)} · ${this._escape(control.attributes?.status || "Waiting")}</strong><span>${this._escape(control.attributes?.active_mode || "Self-Gen/Zero Export")} · ${this._escape(control.attributes?.reason || `Use the ${isCosy ? "Cosy" : "Agile"} Automated Control entity to opt in`)}</span></div>` : ""}
       ${shadow ? `<div class="shadow-state"><strong>${this._escape(tariffName)} operating state: ${this._escape(shadow.state)}</strong><span>${control?.state === "on" ? "Using" : "Would use"} ${this._escape(shadow.attributes?.recommended_operating_mode || "Self-Gen/Zero Export")} · ${this._escape(shadow.attributes?.reason || "Waiting for a decision")}</span></div>` : ""}
       ${this._day(today, "Today")}
       ${this._day(tomorrow, "Tomorrow")}

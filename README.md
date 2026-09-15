@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.21-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.22-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe Octopus Agile battery planner and opt-in guarded automation.
@@ -13,8 +13,8 @@ and retains the `aecc_battery` integration domain, so existing entity IDs remain
 compatible. This fork appears in Home Assistant as **AFERIY PS240 Agile**.
 
 > [!IMPORTANT]
-> The Agile plan remains shadow-only until you explicitly turn on the
-> **Agile Automated Control** switch. The guarded controller is a beta feature,
+> Each rate plan remains shadow-only until you explicitly turn on its matching
+> **Agile Automated Control** or **Cosy Automated Control** switch. The guarded controllers are beta features,
 > starts Off after every restart, and never uses fixed Discharge or Feed.
 > Leave Smart Overnight Charging **Off** because the two schedulers are
 > deliberately interlocked.
@@ -35,7 +35,7 @@ compatible. This fork appears in Home Assistant as **AFERIY PS240 Agile**.
 - Custom AFERIY PS240 icon
 - Bundled AFERIY Overnight Plan dashboard card
 - View-only Octopus Agile Proposed Plans for today and tomorrow
-- Opt-in guarded Agile Automated Control toggle, off after every restart
+- Separate opt-in Agile and Cosy Automated Control toggles, off after every restart
 - Confirmed Agile limits: 1200 W AC charging and 1000 W CT-controlled household supply
 - GBP/kWh profitability checks and malformed/stale tariff-data safeguards
 - PV-adjusted net-demand planning based on an anonymized half-hour profile
@@ -147,7 +147,7 @@ For a dedicated dashboard area, register this JavaScript module under
 **Settings → Dashboards → Resources**:
 
 ```text
-/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.21
+/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.22
 ```
 
 Then add **AFERIY Wi-Fi Loss Recovery** from the card picker, or use:
@@ -244,7 +244,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.21`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.22`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 
@@ -287,6 +287,7 @@ today_entity: sensor.your_battery_agile_proposed_plan_today
 tomorrow_entity: sensor.your_battery_agile_proposed_plan_tomorrow
 shadow_entity: sensor.your_battery_agile_shadow_operating_state
 control_entity: switch.your_battery_agile_automated_control
+cosy_control_entity: switch.your_battery_cosy_automated_control
 ```
 
 Find the exact entity IDs under **Developer Tools → States** by searching for
@@ -303,7 +304,8 @@ from the AFERIY device, such as:
 - AC Charging Power
 - Battery Discharging Power
 - Grid Import/Export
-- Agile Automated Control (keep Off until you deliberately begin the guarded beta)
+- Agile Automated Control (Agile only; keep Off until deliberately testing)
+- Cosy Automated Control (Cosy only; keep Off until deliberately testing)
 - Connection Status
 
 The separate **AFERIY Overnight Plan** card describes the inherited
@@ -336,12 +338,12 @@ they are not a forecast of the household's complete electricity bill. Sensor
 attributes expose the complete validated timetable and an explicit
 `control_enabled` marker.
 
-## Guarded Agile Automated Control
+## Guarded Agile and Cosy Automated Control
 
-The **Agile Automated Control** configuration switch is the explicit opt-in
-for the beta executor. When it is Off, the planner and logger continue in
-shadow mode exactly as before. Turning it On is accepted only when the Octopus
-Agile or Cosy tariff is selected, the fixed-window Overnight Charge selector is Off,
+The **Agile Automated Control** and **Cosy Automated Control** configuration
+switches are separate explicit opt-ins. When the matching switch is Off, the
+planner and logger continue in shadow mode exactly as before. Each switch is
+accepted only for its matching tariff, the fixed-window Overnight Charge selector is Off,
 the complete battery bank is present, and connection/SOC/rate data are fresh.
 
 The controller:
@@ -463,7 +465,8 @@ The Energy Tariff defaults to **Octopus Agile**. In Agile or Cosy mode, the
 Proposed Plan uses the selected current-day and next-day Octopus rate events.
 Both tariffs disable the legacy fixed-window Smart Overnight scheduler to avoid
 conflicting commands. The plan remains advisory until **Agile Automated
-Control** is explicitly enabled. Custom Off-Peak Start/End controls are
+Control** or **Cosy Automated Control** is explicitly enabled for the selected
+tariff. Custom Off-Peak Start/End controls are
 available only with the Custom tariff preset.
 
 Fixed-window presets remain available for Snug Octopus, Intelligent Octopus Go,
@@ -480,6 +483,13 @@ Cosy Octopus uses Charge-to-target during its three local-time cheap periods:
 and `16:00-22:00`. At target SOC, a cheap period holds Idle; useful live PV
 keeps Self-Gen active instead of forcing grid charging. The dashboard displays
 every phase and its validated price. Regional Cosy unit prices are not hard-coded.
+
+The Cosy target is calculated separately for each cheap period using the
+configured battery capacity and discharge reserve. It budgets a maximum 850 W
+of battery supply—0.425 kWh per half-hour—through the non-cheap period before
+the next cheap window. If live SOC already meets that target, the controller
+uses Idle rather than purchasing unnecessary energy. Targets are capped at
+100%, and the plan reports any energy the installed battery capacity cannot cover.
 
 The external helper checkboxes are reminders for installers. They do not install or validate integrations. Smart estimates look for standard Solcast forecast files and sensors and use `zone.home` for home occupancy. Battery control and the overnight target use the configured tariff window and AECC grid reading; Shelly comparison remains diagnostic only.
 
@@ -583,7 +593,7 @@ off-peak window and any SMART forecast/demand tuning that has been applied.
 To make it available in Home Assistant's card picker:
 
 1. Restart Home Assistant after installing or updating the integration.
-2. Add dashboard resource `/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.21`
+2. Add dashboard resource `/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.22`
    as a JavaScript module.
 3. Edit a dashboard, choose Add card, switch to By card, and search for
    `AFERIY Overnight Plan`.

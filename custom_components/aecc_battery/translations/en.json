@@ -69,7 +69,7 @@
           "tariff_preset": "Defaults to Octopus Agile. Agile and Cosy use the current/next-day rate events above. Both disable fixed-window Smart Overnight Charging so it cannot conflict with guarded rate-plan control.",
           "off_peak_start": "Start of a custom fixed-rate charging window in 24-hour HH:MM format. Used only with the Custom tariff preset.",
           "off_peak_end": "End of a custom fixed-rate charging window in 24-hour HH:MM format. Used only with the Custom tariff preset.",
-          "agile_planner_enabled": "Creates daily plans from Octopus Agile or Cosy rates. Plans remain view-only unless you explicitly enable the guarded Agile Automated Control switch.",
+          "agile_planner_enabled": "Creates daily plans from Octopus Agile or Cosy rates. Plans remain view-only unless you explicitly enable the matching guarded Agile or Cosy Automated Control switch.",
           "agile_current_day_rates_entity": "BottlecapDave Octopus Energy current-day import rates event. Leave empty for safe automatic discovery when there is exactly one import meter.",
           "agile_next_day_rates_entity": "BottlecapDave Octopus Energy next-day import rates event. Leave empty for safe automatic discovery when there is exactly one import meter.",
           "agile_ready_by": "Agile target time for a full battery. Cosy instead follows its fixed three-period daily schedule.",

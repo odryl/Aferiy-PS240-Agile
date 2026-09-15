@@ -5,8 +5,8 @@
 The integration reads BottlecapDave Octopus Energy current-day and next-day
 rate event entities, publishes a Proposed Plan, and exposes an operating-state
 recommendation. It remains view-only until the user explicitly turns on the
-**Agile Automated Control** switch. That toggle always starts Off after an
-integration or Home Assistant restart.
+matching **Agile Automated Control** or **Cosy Automated Control** switch. Both
+toggles always start Off after an integration or Home Assistant restart.
 
 The planner enforces these invariants:
 
@@ -36,6 +36,10 @@ schedule: Charge-to-target at 04:00-07:00, 13:00-16:00, and 22:00-00:00; Idle
 at 00:00-04:00; and CT-controlled Self-Gen/Zero Export at 07:00-13:00 and
 16:00-22:00. Live PV takes priority over grid charge, and reaching target SOC
 changes the cheap-period recommendation to Idle.
+The target for each cheap period is sized from configured capacity and reserve,
+assuming no more than 850 W (0.425 kWh per half-hour) can be supplied until the
+next cheap window. The target is capped at 100%, and insufficient installed
+capacity is exposed as a cover shortfall rather than hidden.
 
 Before next-day rates are published, Tomorrow's plan assumes the battery begins
 at its reserve SOC. Once both valid days are available, Today values discharge
@@ -69,8 +73,9 @@ commands to the selected half-hour/partial period, and verifies every register
 write. Profitable discharge always selects Self-Gen/Zero Export so the PS240 CT
 loop follows household load; fixed Discharge and Feed are forbidden.
 
-The controller interlocks against the legacy overnight scheduler, tariffs other
-than Agile or Cosy, incomplete storage topology, stale telemetry, and invalid decisions.
+Each tariff has a separate controller toggle. The controller interlocks against
+the legacy overnight scheduler, the wrong selected tariff, the other rate-plan
+controller, incomplete storage topology, stale telemetry, and invalid decisions.
 Turning it off or making a manual mode selection restores Self-Gen. A persisted
 pending-restore marker survives restart without restoring the toggle itself,
 allowing an interrupted custom command to be cleared after the next healthy
