@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.8.24
+
+- Add a persistent, opt-in **Cosy Daylight Flex** control for the 13:00-16:00
+  cheap period. It can use CT-controlled Self-Gen while at least 100 W of live
+  or inferred solar is present.
+- Continuously calculate whether the configured Charge Limit remains reachable
+  by 16:00 from live SOC, battery capacity, 90% charge efficiency, and the
+  guarded 1,200 W system charge ceiling. Preserve one full 30-minute cheap-rate
+  safety slot and start charging immediately when the margin is exhausted.
+- Show the toggle state and current catch-up margin on the Agile/Cosy dashboard.
+  Grid charging remains bounded to validated Cosy cheap slots and can never be
+  extended into the peak-price period by Daylight Flex.
+
 ## 1.8.23
 
 - Use the existing **Charge Limit** control as the upper SOC boundary for both

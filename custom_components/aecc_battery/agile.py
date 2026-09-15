@@ -18,6 +18,8 @@ _PLANNER_REVISION = 3
 _SHADOW_DECISION_REVISION = 1
 _COSY_SCHEDULE_REVISION = 2
 _COSY_MAX_BATTERY_OUTPUT_W = 850
+_COSY_DAYLIGHT_FLEX_SOLAR_THRESHOLD_W = 100
+_COSY_DAYLIGHT_FLEX_SAFETY_MINUTES = 30
 
 
 def validate_octopus_rate_source(
@@ -776,6 +778,7 @@ def build_agile_shadow_decision(
     ac_charge_power_w: float,
     pv_quiet_minutes: float,
     locked_action: Mapping[str, Any] | None = None,
+    cosy_daylight_flex_enabled: bool = False,
 ) -> dict[str, Any]:
     """Recommend a view-only operating state without sending device commands."""
     base = {
@@ -860,6 +863,94 @@ def build_agile_shadow_decision(
             "Self-Gen/Zero Export",
             "Battery SOC has reached the plan target; grid charging is inhibited.",
             charge_inhibited_reason="target_reached",
+            **action_attrs,
+        )
+    cosy_daylight_slot = bool(
+        cosy_schedule
+        and action.get("tariff_phase") == "cheap_charge"
+        and 13 <= now.hour < 16
+    )
+    if action_name == "charge" and cosy_daylight_slot:
+        deadline = now.replace(hour=16, minute=0, second=0, microsecond=0)
+        remaining_cheap_minutes = max(0.0, (deadline - now).total_seconds() / 60)
+        try:
+            capacity_kwh = float(plan["battery_capacity_kwh"])
+            charge_efficiency = float(plan.get("charge_efficiency", 0.90))
+            max_charge_power_w = float(plan["max_system_charge_power_w"])
+            numeric_target_soc = float(target_soc)
+            stored_deficit_kwh = capacity_kwh * max(0.0, numeric_target_soc - soc_percent) / 100
+            stored_charge_kwh_per_minute = max_charge_power_w / 1000 * charge_efficiency / 60
+            required_charge_minutes = stored_deficit_kwh / stored_charge_kwh_per_minute
+            flex_inputs_valid = bool(
+                all(
+                    isfinite(value)
+                    for value in (
+                        capacity_kwh,
+                        charge_efficiency,
+                        max_charge_power_w,
+                        numeric_target_soc,
+                        required_charge_minutes,
+                    )
+                )
+                and capacity_kwh > 0
+                and 0 < charge_efficiency <= 1
+                and max_charge_power_w > 0
+            )
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            stored_deficit_kwh = None
+            required_charge_minutes = None
+            flex_inputs_valid = False
+        flex_margin_minutes = (
+            remaining_cheap_minutes
+            - float(required_charge_minutes)
+            - _COSY_DAYLIGHT_FLEX_SAFETY_MINUTES
+            if flex_inputs_valid and required_charge_minutes is not None
+            else None
+        )
+        flex_attrs = {
+            "cosy_daylight_flex_enabled": bool(cosy_daylight_flex_enabled),
+            "cosy_daylight_flex_deadline": deadline.isoformat(),
+            "cosy_daylight_flex_solar_threshold_w": _COSY_DAYLIGHT_FLEX_SOLAR_THRESHOLD_W,
+            "cosy_daylight_flex_safety_minutes": _COSY_DAYLIGHT_FLEX_SAFETY_MINUTES,
+            "remaining_cheap_minutes": round(remaining_cheap_minutes, 1),
+            "required_charge_minutes": (
+                round(float(required_charge_minutes), 1) if required_charge_minutes is not None else None
+            ),
+            "stored_charge_deficit_kwh": (
+                round(float(stored_deficit_kwh), 3) if stored_deficit_kwh is not None else None
+            ),
+            "daylight_flex_margin_minutes": (
+                round(float(flex_margin_minutes), 1) if flex_margin_minutes is not None else None
+            ),
+        }
+        meaningful_solar = (
+            max(0.0, pv_power_w, inferred_pv_charge_w)
+            >= _COSY_DAYLIGHT_FLEX_SOLAR_THRESHOLD_W
+        )
+        if (
+            cosy_daylight_flex_enabled
+            and meaningful_solar
+            and flex_inputs_valid
+            and flex_margin_minutes is not None
+            and flex_margin_minutes >= 0
+        ):
+            return result(
+                "Cosy Daylight Flex",
+                "Self-Gen/Zero Export",
+                "Useful daylight is present and enough cheap-rate charging time remains to reach the 16:00 target.",
+                charge_inhibited_reason="daylight_flex_headroom",
+                **flex_attrs,
+                **action_attrs,
+            )
+        return result(
+            "Planned Charge",
+            "Charge",
+            (
+                "Daylight Flex is off; charge during the cheap period to protect the 16:00 target."
+                if not cosy_daylight_flex_enabled
+                else "Charge now because useful solar or sufficient cheap-rate catch-up time is unavailable."
+            ),
+            **flex_attrs,
             **action_attrs,
         )
     if action_name == "charge" and solar_active:
@@ -960,6 +1051,7 @@ def agile_control_mode_for_state(
         in {
             "Solar Self-Gen",
             "Solar Charge Deferred",
+            "Cosy Daylight Flex",
             "Charge Target Reached",
             "Peak Self-Gen",
             "Cosy Self-Gen",

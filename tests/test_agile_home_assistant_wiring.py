@@ -169,9 +169,11 @@ def test_agile_control_is_explicit_guarded_and_recoverable() -> None:
     assert '"Waiting for Agile restore"' in COORDINATOR_SOURCE
     assert "payload[REG_CONTROL_TIME2] = SLOT_DISABLED" in COORDINATOR_SOURCE
     assert "agile_control_command_errors(" in COORDINATOR_SOURCE
+    assert 'operation_prefix in ("agile_control", "cosy_control")' in COORDINATOR_SOURCE
     assert "_async_disable_agile_control" in SELECT_SOURCE
     assert "COSY_OCTOPUS_TARIFF_PRESET" in SWITCH_SOURCE
     assert "AeccCosyAutomaticControlSwitch" in SWITCH_SOURCE
+    assert "AeccCosyDaylightFlexSwitch" in SWITCH_SOURCE
     assert 'unique_suffix="cosy_automatic_control"' in SWITCH_SOURCE
     assert 'operation_prefix="cosy_control"' in SWITCH_SOURCE
     assert "coordinator.cosy_controller" in SWITCH_SOURCE
@@ -184,6 +186,9 @@ def test_agile_card_surfaces_but_does_not_silently_enable_control() -> None:
     assert "callService" not in CARD_SOURCE
     assert '"_cosy_automated_control"' in CARD_SOURCE
     assert '"Cosy Automated Control"' in CARD_SOURCE
+    assert '"_cosy_daylight_flex"' in CARD_SOURCE
+    assert '"Cosy Daylight Flex"' in CARD_SOURCE
+    assert "daylight_flex_margin_minutes" in CARD_SOURCE
     assert "slot_target_soc" in CARD_SOURCE
     assert "required_cover_kwh" in CARD_SOURCE
     assert "Capacity shortfall" in CARD_SOURCE

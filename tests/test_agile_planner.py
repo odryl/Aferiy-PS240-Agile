@@ -757,6 +757,78 @@ def test_cosy_shadow_charges_holds_and_self_generates_by_tariff_phase() -> None:
     assert decision("self_gen")["recommended_operating_mode"] == "Self-Gen/Zero Export"
 
 
+def test_cosy_daylight_flex_uses_self_gen_only_with_safe_catch_up_time() -> None:
+    plan = {
+        "status": "proposed",
+        "target_soc": 90,
+        "battery_capacity_kwh": 5.874,
+        "charge_efficiency": 0.90,
+        "max_system_charge_power_w": 1200,
+        "tariff_strategy": "cosy_fixed_daily_schedule",
+        "slots": [],
+    }
+
+    def decision(now: datetime, soc: float, pv_power_w: float, enabled: bool = True) -> dict[str, object]:
+        return AGILE.build_agile_shadow_decision(
+            plan,
+            now=now,
+            connection_fresh=True,
+            soc_percent=soc,
+            reserve_soc=20,
+            pv_power_w=pv_power_w,
+            total_charge_power_w=0,
+            ac_charge_power_w=0,
+            pv_quiet_minutes=0,
+            locked_action={
+                "action": "charge",
+                "tariff_phase": "cheap_charge",
+                "slot_target_soc": 90,
+                "start": now.replace(minute=0).isoformat(),
+                "end": (now.replace(minute=0) + timedelta(minutes=30)).isoformat(),
+                "command_power_limit_w": 1200,
+                "duration_minutes": 30,
+            },
+            cosy_daylight_flex_enabled=enabled,
+        )
+
+    early = decision(
+        datetime(2026, 7, 27, 13, 0, tzinfo=ZoneInfo("Europe/London")),
+        80,
+        500,
+    )
+    assert early["state"] == "Cosy Daylight Flex"
+    assert early["recommended_operating_mode"] == "Self-Gen/Zero Export"
+    assert early["required_charge_minutes"] == 32.6
+    assert early["daylight_flex_margin_minutes"] == 117.4
+
+    late = decision(
+        datetime(2026, 7, 27, 15, 15, tzinfo=ZoneInfo("Europe/London")),
+        80,
+        500,
+    )
+    assert late["state"] == "Planned Charge"
+    assert late["recommended_operating_mode"] == "Charge"
+    assert late["daylight_flex_margin_minutes"] == -17.6
+
+    no_solar = decision(
+        datetime(2026, 7, 27, 13, 0, tzinfo=ZoneInfo("Europe/London")),
+        80,
+        0,
+    )
+    assert no_solar["recommended_operating_mode"] == "Charge"
+
+    disabled = decision(
+        datetime(2026, 7, 27, 13, 0, tzinfo=ZoneInfo("Europe/London")),
+        80,
+        500,
+        enabled=False,
+    )
+    assert disabled["recommended_operating_mode"] == "Charge"
+    assert AGILE.agile_control_mode_for_state(
+        "Cosy Daylight Flex", "Self-Gen/Zero Export"
+    ) == "Self-Gen/Zero Export"
+
+
 def test_cosy_schedule_rejects_incomplete_late_day_rates() -> None:
     rates = _rates("2026-07-27")[:-1]
     economic_plan = AGILE.build_agile_day_plan(

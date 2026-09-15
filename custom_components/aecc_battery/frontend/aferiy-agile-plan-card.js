@@ -49,6 +49,9 @@ class AferiyAgilePlanCard extends HTMLElement {
     const control = isCosy
       ? this._findSwitch(this.config.cosy_control_entity, "_cosy_automated_control", "Cosy Automated Control")
       : this._findSwitch(this.config.control_entity, "_agile_automated_control", "Agile Automated Control");
+    const daylightFlex = isCosy
+      ? this._findSwitch(this.config.cosy_daylight_flex_entity, "_cosy_daylight_flex", "Cosy Daylight Flex")
+      : null;
     const signature = JSON.stringify([
       today?.entity_id,
       today?.state,
@@ -61,15 +64,18 @@ class AferiyAgilePlanCard extends HTMLElement {
       shadow?.attributes?.recommended_operating_mode,
       shadow?.attributes?.reason,
       shadow?.attributes?.planned_slot_start,
+      shadow?.attributes?.daylight_flex_margin_minutes,
       control?.entity_id,
       control?.state,
       control?.attributes?.status,
       control?.attributes?.reason,
       control?.attributes?.active_mode,
+      daylightFlex?.entity_id,
+      daylightFlex?.state,
     ]);
     if (!force && signature === this._renderSignature) return;
     this._renderSignature = signature;
-    this.render(today, tomorrow, shadow, control);
+    this.render(today, tomorrow, shadow, control, daylightFlex);
   }
 
   _timelineStorageKey() {
@@ -259,7 +265,7 @@ class AferiyAgilePlanCard extends HTMLElement {
     </section>`;
   }
 
-  render(today, tomorrow, shadow, control) {
+  render(today, tomorrow, shadow, control, daylightFlex) {
     if (!this._hass) return;
     this._loadOpenTimelines();
     this.querySelectorAll("details[data-timeline]").forEach((details) => {
@@ -310,6 +316,7 @@ class AferiyAgilePlanCard extends HTMLElement {
       <h2>${this._escape(this.config.title || `${tariffName} Battery Plan`)}</h2>
       <p class="subtitle">Today and tomorrow · price-aware planning${control?.state === "on" ? " · automated control enabled" : " · shadow-only while control is off"}</p>
       ${control ? `<div class="shadow-state"><strong>${this._escape(isCosy ? "Cosy" : "Agile")} automated control: ${this._escape(control.state)} · ${this._escape(control.attributes?.status || "Waiting")}</strong><span>${this._escape(control.attributes?.active_mode || "Self-Gen/Zero Export")} · ${this._escape(control.attributes?.reason || `Use the ${isCosy ? "Cosy" : "Agile"} Automated Control entity to opt in`)}</span></div>` : ""}
+      ${daylightFlex ? `<div class="shadow-state"><strong>Cosy Daylight Flex: ${this._escape(daylightFlex.state)}</strong><span>13:00–16:00 solar-aware Self-Gen · keeps a 30-minute cheap-rate charging reserve${Number.isFinite(Number(shadow?.attributes?.daylight_flex_margin_minutes)) ? ` · ${this._number(shadow.attributes.daylight_flex_margin_minutes, " min", 1)} margin now` : ""}</span></div>` : ""}
       ${shadow ? `<div class="shadow-state"><strong>${this._escape(tariffName)} operating state: ${this._escape(shadow.state)}</strong><span>${control?.state === "on" ? "Using" : "Would use"} ${this._escape(shadow.attributes?.recommended_operating_mode || "Self-Gen/Zero Export")} · ${this._escape(shadow.attributes?.reason || "Waiting for a decision")}</span></div>` : ""}
       ${this._day(today, "Today")}
       ${this._day(tomorrow, "Tomorrow")}

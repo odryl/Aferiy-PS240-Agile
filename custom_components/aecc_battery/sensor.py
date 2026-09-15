@@ -1180,6 +1180,9 @@ class AeccAgileShadowOperatingStateSensor(
             ac_charge_power_w=ac_charge_power_w,
             pv_quiet_minutes=pv_quiet_minutes,
             locked_action=action,
+            cosy_daylight_flex_enabled=bool(
+                getattr(self.coordinator, "cosy_daylight_flex_enabled", False)
+            ),
         )
         forecast_entries = self._solar_forecast_config_entries()
         decision.update(

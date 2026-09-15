@@ -49,6 +49,7 @@ async def async_setup_entry(
             AeccAutomaticDataloggerRestartSwitch(coordinator, config_entry),
             AeccAgileAutomaticControlSwitch(coordinator, config_entry),
             AeccCosyAutomaticControlSwitch(coordinator, config_entry),
+            AeccCosyDaylightFlexSwitch(coordinator, config_entry),
             AeccWifiLossRecoverySwitch(coordinator, config_entry),
         ]
     )
@@ -528,6 +529,59 @@ class AeccCosyAutomaticControlSwitch(AeccAgileAutomaticControlSwitch):
             coordinator_attribute="cosy_controller",
             operation_prefix="cosy_control",
         )
+
+
+class AeccCosyDaylightFlexSwitch(CoordinatorEntity[AeccBatteryCoordinator], SwitchEntity):
+    """Allow guarded daytime Self-Gen when the Cosy target remains reachable."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Cosy Daylight Flex"
+    _attr_icon = "mdi:weather-sunny-alert"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        coordinator: AeccBatteryCoordinator,
+        config_entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{config_entry.entry_id}_cosy_daylight_flex"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return self.coordinator.device_info
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.coordinator.cosy_daylight_flex_enabled)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "applies_during": "13:00-16:00 Cosy cheap period",
+            "solar_threshold_w": 100,
+            "catch_up_safety_minutes": 30,
+            "control_policy": (
+                "Use Self-Gen only while useful live solar is present and the configured "
+                "Charge Limit remains reachable before 16:00 at the guarded charge rate."
+            ),
+        }
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self.coordinator.cosy_daylight_flex_enabled = True
+        await self.coordinator.async_save_runtime_preferences(
+            cosy_daylight_flex_enabled=True
+        )
+        self.coordinator.async_update_listeners()
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self.coordinator.cosy_daylight_flex_enabled = False
+        await self.coordinator.async_save_runtime_preferences(
+            cosy_daylight_flex_enabled=False
+        )
+        self.coordinator.async_update_listeners()
+        self.async_write_ha_state()
 
 
 class AeccAutomaticDataloggerRestartSwitch(CoordinatorEntity[AeccBatteryCoordinator], SwitchEntity):

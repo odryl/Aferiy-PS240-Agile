@@ -186,6 +186,7 @@ async def async_get_config_entry_diagnostics(
         ),
         "commanded_min_soc": coordinator._commanded_min_soc,
         "commanded_max_soc": coordinator._commanded_max_soc,
+        "cosy_daylight_flex_enabled": coordinator.cosy_daylight_flex_enabled,
         "initial_min_soc": coordinator.initial_min_soc,
         "initial_max_soc": coordinator.initial_max_soc,
         "initial_max_feed_power": coordinator.initial_max_feed_power,

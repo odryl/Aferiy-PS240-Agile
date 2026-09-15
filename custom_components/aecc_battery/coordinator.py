@@ -308,6 +308,7 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "reason": "Waiting for a completed SMART overnight cycle.",
         }
         self.solar_unavailable_override: bool = False
+        self.cosy_daylight_flex_enabled: bool = False
         self._commanded_min_soc: int = 10
         self._commanded_max_soc: int = 100
         self.extended_power: bool = extended_power
@@ -552,6 +553,9 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
         self.solar_unavailable_override = bool(data.get("solar_unavailable_override", False))
+        self.cosy_daylight_flex_enabled = bool(
+            data.get("cosy_daylight_flex_enabled", False)
+        )
         self.self_gen_reconnect_queue_enabled = bool(
             data.get("self_gen_reconnect_queue_enabled", False)
         )
@@ -614,6 +618,7 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "manual_off_peak_start": self.manual_off_peak_start,
             "manual_off_peak_end": self.manual_off_peak_end,
             "solar_unavailable_override": bool(self.solar_unavailable_override),
+            "cosy_daylight_flex_enabled": bool(self.cosy_daylight_flex_enabled),
             "self_gen_reconnect_queue_enabled": bool(self.self_gen_reconnect_queue_enabled),
             "auto_datalogger_restart_enabled": bool(
                 self.auto_datalogger_restart_enabled
@@ -2821,7 +2826,7 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ):
                     raise ValueError("Battery control slot times must use HH:MM")
 
-        if operation_prefix == "agile_control":
+        if operation_prefix in ("agile_control", "cosy_control"):
             command_errors = agile_control_command_errors(
                 direction,
                 power_w,
