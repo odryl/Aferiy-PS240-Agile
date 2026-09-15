@@ -30,12 +30,13 @@ def test_overnight_charge_latches_until_off_peak_end() -> None:
     assert "await self._overnight_idle_above_target(target_soc, base_attrs)" not in source
 
 
-def test_overnight_charge_uses_locked_target_not_global_charge_limit() -> None:
+def test_overnight_charge_uses_locked_target_bounded_by_global_charge_limit() -> None:
     source = COORDINATOR.read_text()
 
     assert 'success = await self.async_set_battery_control(\n            "Charge",' in source
     assert "charge_soc=target_soc" in source
     assert "charge_soc = self._commanded_max_soc if charge_soc is None else charge_soc" in source
+    assert "min(charge_soc, self._commanded_max_soc, 100)" in source
 
 
 def test_smart_charge_waits_for_complete_confirmed_bank() -> None:

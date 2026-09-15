@@ -698,6 +698,33 @@ def test_cosy_half_hour_rates_produce_fixed_daily_operating_schedule() -> None:
     assert plan["cosy_max_battery_output_per_half_hour_kwh"] == 0.425
 
 
+def test_cosy_targets_respect_configured_charge_and_discharge_limits() -> None:
+    plan = AGILE.build_agile_day_plan(
+        _rates("2026-07-27"),
+        timezone="Europe/London",
+        battery_capacity_kwh=5.874,
+        starting_soc=20,
+        reserve_soc=20,
+        target_soc=90,
+        expected_date=date(2026, 7, 27),
+    )
+    plan = AGILE.apply_cosy_rate_schedule(plan)
+
+    charge_slots = [slot for slot in plan["slots"] if slot["action"] == "charge"]
+    morning = next(slot for slot in charge_slots if slot["local_start"] == "04:00")
+    afternoon = next(slot for slot in charge_slots if slot["local_start"] == "13:00")
+    evening = next(slot for slot in charge_slots if slot["local_start"] == "22:00")
+
+    assert plan["reserve_soc"] == 20
+    assert plan["target_soc"] == 90
+    assert morning["slot_target_soc"] == 90.0
+    assert afternoon["slot_target_soc"] == 90.0
+    assert evening["slot_target_soc"] == 78.0
+    assert morning["cover_shortfall_kwh"] == 0.988
+    assert afternoon["cover_shortfall_kwh"] == 0.988
+    assert evening["cover_shortfall_kwh"] == 0.0
+
+
 def test_cosy_shadow_charges_holds_and_self_generates_by_tariff_phase() -> None:
     now = datetime(2026, 7, 27, 4, 0, tzinfo=ZoneInfo("Europe/London"))
     plan = {

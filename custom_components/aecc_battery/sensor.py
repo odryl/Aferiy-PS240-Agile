@@ -867,6 +867,7 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
             return self._invalid_plan(" ".join(source_errors), source_errors)
 
         reserve_soc = float(getattr(self.coordinator, "_commanded_min_soc", 10))
+        charge_limit_soc = float(getattr(self.coordinator, "_commanded_max_soc", 100))
         starting_soc = reserve_soc
         starting_soc_source = "conservative_reserve_assumption"
         try:
@@ -907,6 +908,7 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
                 battery_capacity_kwh=self.coordinator.battery_capacity_kwh,
                 starting_soc=today_starting_soc,
                 reserve_soc=reserve_soc,
+                target_soc=charge_limit_soc,
                 expected_date=local_now.date(),
                 now=now_utc,
                 demand_profile_kwh=AGILE_DEFAULT_DEMAND_PROFILE_KWH,
@@ -925,7 +927,7 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
                 and isinstance(projected_soc, int | float)
                 and math.isfinite(float(projected_soc))
             ):
-                starting_soc = max(reserve_soc, min(100.0, float(projected_soc)))
+                starting_soc = max(reserve_soc, min(charge_limit_soc, float(projected_soc)))
                 starting_soc_source = "today_projected_protection_end_soc"
 
         half_hour_bucket = now_utc.replace(
@@ -940,6 +942,7 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
             counterpart.last_updated if counterpart_rates is not None else None,
             round(starting_soc, 1),
             round(reserve_soc, 1),
+            round(charge_limit_soc, 1),
             round(float(self.coordinator.battery_capacity_kwh), 3),
             expected_date,
             half_hour_bucket,
@@ -955,6 +958,7 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
             battery_capacity_kwh=self.coordinator.battery_capacity_kwh,
             starting_soc=starting_soc,
             reserve_soc=reserve_soc,
+            target_soc=charge_limit_soc,
             expected_date=expected_date,
             now=now_utc,
             demand_profile_kwh=AGILE_DEFAULT_DEMAND_PROFILE_KWH,
@@ -987,6 +991,8 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
                 ).isoformat(),
             }
         plan["starting_soc_source"] = starting_soc_source
+        plan["charge_limit_soc"] = charge_limit_soc
+        plan["charge_limit_source"] = "Charge Limit slider / device register 3024"
         plan["tariff_preset"] = self._tariff_preset()
         plan["tariff_name"] = OCTOPUS_RATE_PLAN_TARIFF_NAMES.get(
             self._tariff_preset(),

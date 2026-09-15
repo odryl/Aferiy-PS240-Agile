@@ -2797,7 +2797,12 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         field7 = 5 if has_storage else 4
 
         charge_soc = self._commanded_max_soc if charge_soc is None else charge_soc
-        charge_soc = int(max(self._commanded_min_soc, min(charge_soc, 100)))
+        charge_soc = int(
+            max(
+                self._commanded_min_soc,
+                min(charge_soc, self._commanded_max_soc, 100),
+            )
+        )
         discharge_soc = self._commanded_min_soc
 
         bounded_slot = slot_start is not None or slot_end is not None

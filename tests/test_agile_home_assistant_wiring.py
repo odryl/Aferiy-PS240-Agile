@@ -35,6 +35,13 @@ def test_sensor_passes_expected_day_time_and_demand_profile_to_planner() -> None
     assert "demand_profile_revision=AGILE_DEMAND_PROFILE_REVISION" in SENSOR_SOURCE
 
 
+def test_sensor_uses_charge_limit_for_plans_and_cache_invalidation() -> None:
+    assert 'charge_limit_soc = float(getattr(self.coordinator, "_commanded_max_soc", 100))' in SENSOR_SOURCE
+    assert SENSOR_SOURCE.count("target_soc=charge_limit_soc") == 2
+    assert 'plan["charge_limit_source"] = "Charge Limit slider / device register 3024"' in SENSOR_SOURCE
+    assert "round(charge_limit_soc, 1)" in SENSOR_SOURCE
+
+
 def test_sensor_replans_both_days_as_one_rolling_horizon_when_rates_exist() -> None:
     assert 'next_day_rates=counterpart_rates if self._day_kind == "current" else None' in SENSOR_SOURCE
     assert 'starting_soc_source = "today_projected_protection_end_soc"' in SENSOR_SOURCE
@@ -168,6 +175,7 @@ def test_agile_control_is_explicit_guarded_and_recoverable() -> None:
     assert 'unique_suffix="cosy_automatic_control"' in SWITCH_SOURCE
     assert 'operation_prefix="cosy_control"' in SWITCH_SOURCE
     assert "coordinator.cosy_controller" in SWITCH_SOURCE
+    assert "min(charge_soc, self._commanded_max_soc, 100)" in COORDINATOR_SOURCE
 
 
 def test_agile_card_surfaces_but_does_not_silently_enable_control() -> None:

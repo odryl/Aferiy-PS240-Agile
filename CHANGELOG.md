@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.23
+
+- Use the existing **Charge Limit** control as the upper SOC boundary for both
+  Today and Tomorrow Agile/Cosy plans, including rolling-horizon calculations.
+- Replan when the Charge Limit changes and expose the effective limit and its
+  source in plan attributes.
+- Clamp every automated charge command to the configured Charge Limit as a
+  final safety check. A 20%-90% operating range now produces Cosy targets of
+  90%, 90%, and 78% for the three cheap periods on a 5.874 kWh battery.
+
 ## 1.8.22
 
 - Add a separate opt-in **Cosy Automated Control** switch, leaving the Agile
