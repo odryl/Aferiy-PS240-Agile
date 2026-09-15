@@ -16,7 +16,7 @@ _DEFAULT_MINIMUM_SAVING_GBP_PER_KWH = 0.03
 _REQUIRED_SOURCE_ATTRIBUTES = ("mpan", "serial_number", "tariff_code")
 _PLANNER_REVISION = 3
 _SHADOW_DECISION_REVISION = 1
-_COSY_SCHEDULE_REVISION = 2
+_COSY_SCHEDULE_REVISION = 3
 _COSY_MAX_BATTERY_OUTPUT_W = 850
 _COSY_DAYLIGHT_FLEX_SOLAR_THRESHOLD_W = 100
 _COSY_DAYLIGHT_FLEX_SAFETY_MINUTES = 30
@@ -664,7 +664,7 @@ def apply_cosy_rate_schedule(
         return 8, "04:00 next day"
 
     slots: list[dict[str, Any]] = []
-    phase_counts = {"cheap_charge": 0, "overnight_idle": 0, "self_gen": 0}
+    phase_counts = {"cheap_charge": 0, "self_gen": 0}
     for raw_slot in scheduled.get("slots", []):
         if not isinstance(raw_slot, Mapping):
             continue
@@ -690,11 +690,6 @@ def apply_cosy_rate_schedule(
             command_power_limit_w = int(
                 scheduled.get("max_system_charge_power_w") or _SAFE_AGILE_CHARGE_POWER_CEILING_W
             )
-            duration_minutes = 30.0
-        elif minute < 240:
-            action = "idle"
-            phase = "overnight_idle"
-            command_power_limit_w = 0
             duration_minutes = 30.0
         else:
             action = "self_gen"
@@ -741,9 +736,8 @@ def apply_cosy_rate_schedule(
         {
             "status": "proposed",
             "reason": (
-                "Cosy schedule: charge to target in the three cheap periods, Idle "
-                "from 00:00-04:00, and CT-controlled Self-Gen/Zero Export from "
-                "07:00-13:00 and 16:00-22:00."
+                "Cosy schedule: charge to target in the three cheap periods and use "
+                "CT-controlled Self-Gen/Zero Export between them, including 00:00-04:00."
             ),
             "economic_plan_status": scheduled.get("status"),
             "economic_plan_reason": scheduled.get("reason"),
@@ -752,13 +746,14 @@ def apply_cosy_rate_schedule(
             "cosy_max_battery_output_w": max_output_w,
             "cosy_max_battery_output_per_half_hour_kwh": round(max_output_per_slot_kwh, 3),
             "scheduled_charge_periods": phase_counts["cheap_charge"],
-            "scheduled_idle_periods": phase_counts["overnight_idle"],
+            "scheduled_idle_periods": 0,
             "scheduled_self_gen_periods": phase_counts["self_gen"],
             "schedule_note": (
                 "Each cheap period charges only to the SOC needed to cover the next "
                 f"non-cheap block at up to {max_output_w} W ("
-                f"{max_output_per_slot_kwh:.3f} kWh per half-hour); otherwise it holds Idle. "
-                "Useful solar always keeps Self-Gen active."
+                f"{max_output_per_slot_kwh:.3f} kWh per half-hour). Between cheap periods, "
+                "Self-Gen supplies the house down to the configured reserve; a cheap period "
+                "holds Idle once its target is reached."
             ),
             "slots": slots,
         }
@@ -970,6 +965,13 @@ def build_agile_shadow_decision(
             **action_attrs,
         )
     if action_name == "idle":
+        if cosy_schedule:
+            return result(
+                "Cosy Self-Gen",
+                "Self-Gen/Zero Export",
+                "Cosy uses CT-controlled Self-Gen between cheap periods, including 00:00-04:00.",
+                **action_attrs,
+            )
         if solar_active:
             return result(
                 "Solar Self-Gen",
@@ -978,9 +980,9 @@ def build_agile_shadow_decision(
                 **action_attrs,
             )
         return result(
-            "Cosy Overnight Hold",
+            "Post-solar Hold",
             "Idle",
-            "Hold the battery from 00:00-04:00 because useful overnight solar is unavailable.",
+            "The validated plan requests a bounded hold while solar is quiet.",
             **action_attrs,
         )
     if soc_percent <= reserve_soc + 0.5:
@@ -1044,7 +1046,7 @@ def agile_control_mode_for_state(
     """Return the only automated mode permitted for a validated decision state."""
     if state == "Planned Charge" and recommended_mode == "Charge":
         return "Charge"
-    if state in {"Post-solar Hold", "Cosy Cheap Hold", "Cosy Overnight Hold"} and recommended_mode == "Idle":
+    if state in {"Post-solar Hold", "Cosy Cheap Hold"} and recommended_mode == "Idle":
         return "Idle"
     if (
         state

@@ -679,12 +679,16 @@ def test_cosy_half_hour_rates_produce_fixed_daily_operating_schedule() -> None:
     assert plan["status"] == "proposed"
     assert plan["tariff_strategy"] == "cosy_fixed_daily_schedule"
     assert plan["scheduled_charge_periods"] == 16
-    assert plan["scheduled_idle_periods"] == 8
-    assert plan["scheduled_self_gen_periods"] == 24
+    assert plan["scheduled_idle_periods"] == 0
+    assert plan["scheduled_self_gen_periods"] == 32
+    assert "overnight_idle" not in {slot["tariff_phase"] for slot in plan["slots"]}
     assert all(slot["rate_gbp_per_kwh"] == 0.10 for slot in charge_slots)
-    assert all(slot["local_start"] < "04:00" for slot in idle_slots)
+    assert idle_slots == []
     assert all(
-        "07:00" <= slot["local_start"] < "13:00" or "16:00" <= slot["local_start"] < "22:00" for slot in self_gen_slots
+        slot["local_start"] < "04:00"
+        or "07:00" <= slot["local_start"] < "13:00"
+        or "16:00" <= slot["local_start"] < "22:00"
+        for slot in self_gen_slots
     )
     morning = next(slot for slot in charge_slots if slot["local_start"] == "04:00")
     afternoon = next(slot for slot in charge_slots if slot["local_start"] == "13:00")
@@ -751,8 +755,8 @@ def test_cosy_shadow_charges_holds_and_self_generates_by_tariff_phase() -> None:
     assert decision("charge")["recommended_operating_mode"] == "Charge"
     assert decision("charge", 80)["state"] == "Cosy Cheap Hold"
     assert decision("charge", 80)["recommended_operating_mode"] == "Idle"
-    assert decision("idle")["state"] == "Cosy Overnight Hold"
-    assert decision("idle")["recommended_operating_mode"] == "Idle"
+    assert decision("idle")["state"] == "Cosy Self-Gen"
+    assert decision("idle")["recommended_operating_mode"] == "Self-Gen/Zero Export"
     assert decision("self_gen")["state"] == "Cosy Self-Gen"
     assert decision("self_gen")["recommended_operating_mode"] == "Self-Gen/Zero Export"
 

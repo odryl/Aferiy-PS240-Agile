@@ -635,7 +635,7 @@ class AeccSmartTariffPresetSelect(
                         for window_start, window_end in TARIFF_PEAK_WINDOWS[preset]
                     ],
                     "operating_schedule": [
-                        {"start": "00:00", "end": "04:00", "mode": "Idle"},
+                        {"start": "00:00", "end": "04:00", "mode": "Self-Gen/Zero Export"},
                         {"start": "04:00", "end": "07:00", "mode": "Charge to target"},
                         {"start": "07:00", "end": "13:00", "mode": "Self-Gen/Zero Export"},
                         {"start": "13:00", "end": "16:00", "mode": "Charge to target"},
@@ -643,9 +643,9 @@ class AeccSmartTariffPresetSelect(
                         {"start": "22:00", "end": "00:00", "mode": "Charge to target"},
                     ],
                     "note": (
-                        "Cosy uses all three cheap periods for charge-to-target, holds "
-                        "Idle from 00:00-04:00, and uses CT-controlled Self-Gen/Zero "
-                        "Export from 07:00-13:00 and 16:00-22:00. Guarded control is opt-in."
+                        "Cosy uses all three cheap periods for charge-to-target and "
+                        "CT-controlled Self-Gen/Zero Export between them, including "
+                        "00:00-04:00. Guarded control is opt-in."
                     ),
                 }
             )

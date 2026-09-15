@@ -32,14 +32,14 @@ The planner enforces these invariants:
   while projected discharge remains zero until reserve is restored
 
 When Cosy is selected, the validated prices are presented with a fixed tariff
-schedule: Charge-to-target at 04:00-07:00, 13:00-16:00, and 22:00-00:00; Idle
-at 00:00-04:00; and CT-controlled Self-Gen/Zero Export at 07:00-13:00 and
-16:00-22:00. Live PV takes priority over grid charge, and reaching target SOC
+schedule: Charge-to-target at 04:00-07:00, 13:00-16:00, and 22:00-00:00, with
+CT-controlled Self-Gen/Zero Export between them at 00:00-04:00, 07:00-13:00,
+and 16:00-22:00. Live PV takes priority over grid charge, and reaching target SOC
 changes the cheap-period recommendation to Idle.
 The target for each cheap period is sized from configured capacity and reserve,
 assuming no more than 850 W (0.425 kWh per half-hour) can be supplied until the
-next cheap window. The target is capped at 100%, and insufficient installed
-capacity is exposed as a cover shortfall rather than hidden.
+next cheap window. The target is capped by the existing Charge Limit control,
+and insufficient usable capacity is exposed as a cover shortfall rather than hidden.
 
 Before next-day rates are published, Tomorrow's plan assumes the battery begins
 at its reserve SOC. Once both valid days are available, Today values discharge

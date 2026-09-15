@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.25
+
+- Correct the Cosy 00:00-04:00 phase to CT-controlled Self-Gen/Zero Export so
+  energy charged from 22:00-00:00 supplies the house until the 04:00 cheap
+  window, down to the configured Discharge Limit.
+- Keep Idle only as the live cheap-period hold after a calculated target has
+  been reached. The fixed Cosy plan now contains 16 charge and 32 Self-Gen
+  half-hours, with no scheduled Idle periods.
+
 ## 1.8.24
 
 - Add a persistent, opt-in **Cosy Daylight Flex** control for the 13:00-16:00
