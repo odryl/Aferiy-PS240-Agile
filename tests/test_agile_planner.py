@@ -833,6 +833,51 @@ def test_cosy_daylight_flex_uses_self_gen_only_with_safe_catch_up_time() -> None
     ) == "Self-Gen/Zero Export"
 
 
+def test_available_pv_prevents_target_hold_when_it_can_cover_house_load() -> None:
+    now = datetime(2026, 7, 27, 13, 30, tzinfo=ZoneInfo("Europe/London"))
+    plan = {
+        "status": "proposed",
+        "target_soc": 90,
+        "tariff_strategy": "cosy_fixed_daily_schedule",
+        "slots": [],
+    }
+    action = {
+        "action": "charge",
+        "tariff_phase": "cheap_charge",
+        "slot_target_soc": 90,
+    }
+
+    def decision(available_pv_w: float | None) -> dict[str, object]:
+        return AGILE.build_agile_shadow_decision(
+            plan,
+            now=now,
+            connection_fresh=True,
+            soc_percent=90,
+            reserve_soc=20,
+            pv_power_w=0,
+            total_charge_power_w=0,
+            ac_charge_power_w=0,
+            pv_quiet_minutes=30,
+            locked_action=action,
+            available_pv_power_w=available_pv_w,
+            house_demand_power_w=200,
+            available_pv_house_margin_w=50,
+        )
+
+    surplus = decision(350)
+    assert surplus["state"] == "Charge Target Reached"
+    assert surplus["recommended_operating_mode"] == "Self-Gen/Zero Export"
+    assert surplus["available_pv_covers_house"] is True
+
+    insufficient = decision(240)
+    assert insufficient["state"] == "Cosy Cheap Hold"
+    assert insufficient["recommended_operating_mode"] == "Idle"
+    assert insufficient["available_pv_covers_house"] is False
+
+    unavailable = decision(None)
+    assert unavailable["recommended_operating_mode"] == "Idle"
+
+
 def test_cosy_schedule_rejects_incomplete_late_day_rates() -> None:
     rates = _rates("2026-07-27")[:-1]
     economic_plan = AGILE.build_agile_day_plan(

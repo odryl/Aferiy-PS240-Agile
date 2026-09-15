@@ -45,6 +45,7 @@ class AferiyAgilePlanCard extends HTMLElement {
     const today = this._find(this.config.today_entity, "_agile_proposed_plan_today", "Agile Proposed Plan Today");
     const tomorrow = this._find(this.config.tomorrow_entity, "_agile_proposed_plan_tomorrow", "Agile Proposed Plan Tomorrow");
     const shadow = this._find(this.config.shadow_entity, "_agile_shadow_operating_state", "Agile Shadow Operating State");
+    const availablePv = this._find(this.config.available_pv_entity, "_available_pv_power", "Available PV Power");
     const isCosy = (today?.attributes?.tariff_name || tomorrow?.attributes?.tariff_name) === "Cosy Octopus";
     const control = isCosy
       ? this._findSwitch(this.config.cosy_control_entity, "_cosy_automated_control", "Cosy Automated Control")
@@ -65,6 +66,10 @@ class AferiyAgilePlanCard extends HTMLElement {
       shadow?.attributes?.reason,
       shadow?.attributes?.planned_slot_start,
       shadow?.attributes?.daylight_flex_margin_minutes,
+      availablePv?.entity_id,
+      availablePv?.state,
+      availablePv?.attributes?.source,
+      availablePv?.attributes?.configured_estimate_status,
       control?.entity_id,
       control?.state,
       control?.attributes?.status,
@@ -75,7 +80,7 @@ class AferiyAgilePlanCard extends HTMLElement {
     ]);
     if (!force && signature === this._renderSignature) return;
     this._renderSignature = signature;
-    this.render(today, tomorrow, shadow, control, daylightFlex);
+    this.render(today, tomorrow, shadow, control, daylightFlex, availablePv);
   }
 
   _timelineStorageKey() {
@@ -265,7 +270,7 @@ class AferiyAgilePlanCard extends HTMLElement {
     </section>`;
   }
 
-  render(today, tomorrow, shadow, control, daylightFlex) {
+  render(today, tomorrow, shadow, control, daylightFlex, availablePv) {
     if (!this._hass) return;
     this._loadOpenTimelines();
     this.querySelectorAll("details[data-timeline]").forEach((details) => {
@@ -317,6 +322,7 @@ class AferiyAgilePlanCard extends HTMLElement {
       <p class="subtitle">Today and tomorrow · price-aware planning${control?.state === "on" ? " · automated control enabled" : " · shadow-only while control is off"}</p>
       ${control ? `<div class="shadow-state"><strong>${this._escape(isCosy ? "Cosy" : "Agile")} automated control: ${this._escape(control.state)} · ${this._escape(control.attributes?.status || "Waiting")}</strong><span>${this._escape(control.attributes?.active_mode || "Self-Gen/Zero Export")} · ${this._escape(control.attributes?.reason || `Use the ${isCosy ? "Cosy" : "Agile"} Automated Control entity to opt in`)}</span></div>` : ""}
       ${daylightFlex ? `<div class="shadow-state"><strong>Cosy Daylight Flex: ${this._escape(daylightFlex.state)}</strong><span>13:00–16:00 solar-aware Self-Gen · keeps a 30-minute cheap-rate charging reserve${Number.isFinite(Number(shadow?.attributes?.daylight_flex_margin_minutes)) ? ` · ${this._number(shadow.attributes.daylight_flex_margin_minutes, " min", 1)} margin now` : ""}</span></div>` : ""}
+      ${availablePv ? `<div class="shadow-state"><strong>Available PV power: ${this._number(availablePv.state, " W", 0)}</strong><span>${this._escape(availablePv.attributes?.source === "configured_available_pv_estimate" ? "Using the configured uncurtailed PV estimate" : "Using measured live PV")}${availablePv.attributes?.configured_estimate_status && availablePv.attributes.configured_estimate_status !== "not_configured" ? ` · estimate ${this._escape(availablePv.attributes.configured_estimate_status)}` : ""}</span></div>` : ""}
       ${shadow ? `<div class="shadow-state"><strong>${this._escape(tariffName)} operating state: ${this._escape(shadow.state)}</strong><span>${control?.state === "on" ? "Using" : "Would use"} ${this._escape(shadow.attributes?.recommended_operating_mode || "Self-Gen/Zero Export")} · ${this._escape(shadow.attributes?.reason || "Waiting for a decision")}</span></div>` : ""}
       ${this._day(today, "Today")}
       ${this._day(tomorrow, "Tomorrow")}

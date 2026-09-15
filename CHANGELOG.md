@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.8.26
+
+- Add an optional **Available PV power entity** setting for a live inverter
+  reading or solar "power now" estimate that remains visible when a full
+  battery causes the PS240 to curtail its own PV input.
+- Publish the combined **Available PV Power** sensor with measured, configured,
+  freshness, unit-validation, and source attributes. Estimates older than 45
+  minutes, invalid values, and accidental self-references are ignored.
+- At a reached Cosy charge target, keep Self-Gen/Zero Export active when the
+  valid available-PV estimate exceeds live household demand by at least 50 W;
+  otherwise retain Idle. Show the effective available PV and source on the card.
+
 ## 1.8.25
 
 - Correct the Cosy 00:00-04:00 phase to CT-controlled Self-Gen/Zero Export so

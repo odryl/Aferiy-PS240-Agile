@@ -23,6 +23,7 @@ from .const import (
     CONF_AGILE_PLANNER_ENABLED,
     CONF_AGILE_PROTECTED_UNTIL,
     CONF_AGILE_READY_BY,
+    CONF_AVAILABLE_PV_POWER_ENTITY,
     CONF_DEPENDENCY_HOME_OCCUPANCY,
     CONF_DEPENDENCY_SOLCAST,
     CONF_HOST,
@@ -279,6 +280,10 @@ class AeccBatteryOptionsFlow(config_entries.OptionsFlow):
                 ),
                 CONF_AGILE_READY_BY: agile_ready_by,
                 CONF_AGILE_PROTECTED_UNTIL: agile_protected_until,
+                CONF_AVAILABLE_PV_POWER_ENTITY: user_input.get(
+                    CONF_AVAILABLE_PV_POWER_ENTITY,
+                    "",
+                ),
                 CONF_DEPENDENCY_SOLCAST: user_input.get(
                     _DEPENDENCY_SOLCAST_FIELD,
                     user_input.get(CONF_DEPENDENCY_SOLCAST, False),
@@ -377,6 +382,17 @@ class AeccBatteryOptionsFlow(config_entries.OptionsFlow):
                         DEFAULT_AGILE_PROTECTED_UNTIL,
                     ),
                 ): str,
+                vol.Optional(
+                    CONF_AVAILABLE_PV_POWER_ENTITY,
+                    description={
+                        "suggested_value": source.get(
+                            CONF_AVAILABLE_PV_POWER_ENTITY,
+                            "",
+                        )
+                    },
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
                 vol.Optional(
                     CONF_TARIFF_PRESET,
                     default=tariff_preset,

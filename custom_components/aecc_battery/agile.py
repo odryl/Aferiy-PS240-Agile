@@ -774,6 +774,9 @@ def build_agile_shadow_decision(
     pv_quiet_minutes: float,
     locked_action: Mapping[str, Any] | None = None,
     cosy_daylight_flex_enabled: bool = False,
+    available_pv_power_w: float | None = None,
+    house_demand_power_w: float | None = None,
+    available_pv_house_margin_w: float = 50.0,
 ) -> dict[str, Any]:
     """Recommend a view-only operating state without sending device commands."""
     base = {
@@ -838,18 +841,47 @@ def build_agile_shadow_decision(
 
     inferred_pv_charge_w = max(0.0, total_charge_power_w - ac_charge_power_w)
     solar_active = max(0.0, pv_power_w) >= 50 or inferred_pv_charge_w >= 50
+    available_pv_covers_house = bool(
+        isinstance(available_pv_power_w, int | float)
+        and isinstance(house_demand_power_w, int | float)
+        and isfinite(float(available_pv_power_w))
+        and isfinite(float(house_demand_power_w))
+        and float(available_pv_power_w)
+        >= max(0.0, float(house_demand_power_w)) + max(0.0, float(available_pv_house_margin_w))
+    )
+    target_hold_attrs = {
+        "available_pv_power_w": (
+            round(max(0.0, float(available_pv_power_w)), 1)
+            if isinstance(available_pv_power_w, int | float) and isfinite(float(available_pv_power_w))
+            else None
+        ),
+        "house_demand_power_w": (
+            round(max(0.0, float(house_demand_power_w)), 1)
+            if isinstance(house_demand_power_w, int | float) and isfinite(float(house_demand_power_w))
+            else None
+        ),
+        "available_pv_house_margin_w": round(max(0.0, float(available_pv_house_margin_w)), 1),
+        "available_pv_covers_house": available_pv_covers_house,
+    }
     target_soc = action.get("slot_target_soc", plan.get("target_soc"))
     target_reached = bool(
         isinstance(target_soc, int | float) and isfinite(float(target_soc)) and soc_percent >= float(target_soc) - 0.5
     )
 
     cosy_schedule = plan.get("tariff_strategy") == "cosy_fixed_daily_schedule"
-    if action_name == "charge" and target_reached and cosy_schedule and not solar_active:
+    if (
+        action_name == "charge"
+        and target_reached
+        and cosy_schedule
+        and not solar_active
+        and not available_pv_covers_house
+    ):
         return result(
             "Cosy Cheap Hold",
             "Idle",
             "Battery SOC has reached the target; hold it during this cheap period.",
             charge_inhibited_reason="target_reached",
+            **target_hold_attrs,
             **action_attrs,
         )
     if action_name == "charge" and target_reached:
@@ -858,6 +890,7 @@ def build_agile_shadow_decision(
             "Self-Gen/Zero Export",
             "Battery SOC has reached the plan target; grid charging is inhibited.",
             charge_inhibited_reason="target_reached",
+            **target_hold_attrs,
             **action_attrs,
         )
     cosy_daylight_slot = bool(
@@ -919,7 +952,15 @@ def build_agile_shadow_decision(
             ),
         }
         meaningful_solar = (
-            max(0.0, pv_power_w, inferred_pv_charge_w)
+            max(
+                0.0,
+                pv_power_w,
+                inferred_pv_charge_w,
+                float(available_pv_power_w)
+                if isinstance(available_pv_power_w, int | float)
+                and isfinite(float(available_pv_power_w))
+                else 0.0,
+            )
             >= _COSY_DAYLIGHT_FLEX_SOLAR_THRESHOLD_W
         )
         if (

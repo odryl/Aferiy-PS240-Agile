@@ -36,6 +36,9 @@ schedule: Charge-to-target at 04:00-07:00, 13:00-16:00, and 22:00-00:00, with
 CT-controlled Self-Gen/Zero Export between them at 00:00-04:00, 07:00-13:00,
 and 16:00-22:00. Live PV takes priority over grid charge, and reaching target SOC
 changes the cheap-period recommendation to Idle.
+An optional Available PV power entity can override curtailed PS240 PV readings
+for that target-reached decision. A fresh W/kW estimate must exceed live house
+demand by at least 50 W before Self-Gen is retained instead of Idle.
 The target for each cheap period is sized from configured capacity and reserve,
 assuming no more than 850 W (0.425 kWh per half-hour) can be supplied until the
 next cheap window. The target is capped by the existing Charge Limit control,

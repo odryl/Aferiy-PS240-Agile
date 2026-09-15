@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.25-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.26-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe Octopus Agile battery planner and opt-in guarded automation.
@@ -149,7 +149,7 @@ For a dedicated dashboard area, register this JavaScript module under
 **Settings → Dashboards → Resources**:
 
 ```text
-/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.25
+/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.26
 ```
 
 Then add **AFERIY Wi-Fi Loss Recovery** from the card picker, or use:
@@ -230,11 +230,10 @@ maximum household output used by the plan (0.5 kWh per half-hour). The Agile
 controller does not send fixed discharge commands.
 
 The fallback Agile profile subtracts historical measured PV from household
-demand. Live forecast values are not yet deducted. The shadow sensor discovers
-the solar-forecast providers selected in Home Assistant's Energy Dashboard so
-a future provider-neutral stage can consume their timestamped forecasts. Until
-that is wired into the planner, forecast PV must not be assumed in its savings
-figures.
+demand. Forecast PV is not deducted from Agile savings figures. For live
+control, however, an optional **Available PV power entity** can provide a
+current inverter reading or solar "power now" estimate when the PS240's own
+reading is curtailed at its Charge Limit.
 
 ## Create an Agile Dashboard
 
@@ -246,7 +245,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.25`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.26`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 
@@ -361,6 +360,14 @@ The controller:
   unsafe, when the toggle is turned Off, or when a manual mode supersedes it
 - persists only an interrupted-command recovery marker; the On state itself is
   never restored after a restart
+
+If the PS240 reports little or no PV when full, select a suitable inverter or
+solar "power now" sensor under **Available PV power entity** in the integration
+options. It must report W or kW. The integration rejects missing, invalid, or
+over-45-minute-old estimates. When a valid estimate exceeds live household
+demand by at least 50 W, reaching the Cosy target keeps Self-Gen active instead
+of changing to Idle. The dashboard shows the effective available power and
+whether it came from live measurement or the configured estimate.
 
 For Cosy, the separate persistent **Cosy Daylight Flex** switch can let the
 battery use CT-controlled Self-Gen during the 13:00-16:00 cheap period while
@@ -606,7 +613,7 @@ off-peak window and any SMART forecast/demand tuning that has been applied.
 To make it available in Home Assistant's card picker:
 
 1. Restart Home Assistant after installing or updating the integration.
-2. Add dashboard resource `/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.25`
+2. Add dashboard resource `/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.26`
    as a JavaScript module.
 3. Edit a dashboard, choose Add card, switch to By card, and search for
    `AFERIY Overnight Plan`.

@@ -22,6 +22,7 @@ CONF_AGILE_CURRENT_DAY_RATES_ENTITY = "agile_current_day_rates_entity"
 CONF_AGILE_NEXT_DAY_RATES_ENTITY = "agile_next_day_rates_entity"
 CONF_AGILE_READY_BY = "agile_ready_by"
 CONF_AGILE_PROTECTED_UNTIL = "agile_protected_until"
+CONF_AVAILABLE_PV_POWER_ENTITY = "available_pv_power_entity"
 CONF_WIFI_LOSS_RECOVERY_ROUTER_HOST = "wifi_loss_recovery_router_host"
 CONF_WIFI_LOSS_RECOVERY_ROUTER_PASSWORD = "wifi_loss_recovery_router_password"
 

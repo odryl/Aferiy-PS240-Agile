@@ -60,6 +60,7 @@
           "agile_next_day_rates_entity": "Octopus next-day rates event",
           "agile_ready_by": "Battery ready by",
           "agile_protected_until": "Protect household demand until",
+          "available_pv_power_entity": "Available PV power entity",
           "dependency_solcast_confirmed": "1. Solcast installed",
           "dependency_home_occupancy_confirmed": "2. Home Occupancy enabled"
         },
@@ -73,7 +74,8 @@
           "agile_current_day_rates_entity": "BottlecapDave Octopus Energy current-day import rates event. Leave empty for safe automatic discovery when there is exactly one import meter.",
           "agile_next_day_rates_entity": "BottlecapDave Octopus Energy next-day import rates event. Leave empty for safe automatic discovery when there is exactly one import meter.",
           "agile_ready_by": "Agile target time for a full battery. Cosy instead follows its fixed three-period daily schedule.",
-          "agile_protected_until": "End of the Agile household protection window. Cosy uses Self-Gen from 07:00-13:00 and 16:00-22:00.",
+          "agile_protected_until": "End of the Agile household protection window. Cosy uses Self-Gen between all three cheap periods.",
+          "available_pv_power_entity": "Optional live inverter power or solar 'power now' estimate that remains available when the battery curtails PV at its Charge Limit. Must report power in W or kW.",
           "master_device": "Choose the master/coordinator, or leave as manual and enter the IP below. Executor units should not be selected.",
           "dependency_solcast_confirmed": "Tick once Solcast PV Forecast is installed. Used for timed solar forecasts and solar-aware estimates.",
           "dependency_home_occupancy_confirmed": "Tick once home occupancy is enabled. Uses Home Assistant's zone.home occupancy count so empty-house periods do not train the normal demand profile."

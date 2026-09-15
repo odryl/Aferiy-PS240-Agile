@@ -48,6 +48,7 @@ from .const import (
     CONF_AGILE_PLANNER_ENABLED,
     CONF_AGILE_PROTECTED_UNTIL,
     CONF_AGILE_READY_BY,
+    CONF_AVAILABLE_PV_POWER_ENTITY,
     CONF_OFF_PEAK_END,
     CONF_OFF_PEAK_START,
     CONF_TARIFF_PRESET,
@@ -156,6 +157,8 @@ _RUNTIME_RECENT_MORNING_MIN_DAYS = 2
 _RUNTIME_MIN_VALID_DAILY_AVERAGE_W = 150.0
 _RUNTIME_MIN_VALID_DAY_MEDIAN_FACTOR = 0.5
 _RUNTIME_SOLAR_ACTIVE_THRESHOLD_W = 100.0
+_AVAILABLE_PV_STALE_AFTER = timedelta(minutes=45)
+_AVAILABLE_PV_HOUSE_MARGIN_W = 50.0
 _ESTIMATED_HOUSE_DEMAND_ENTITY_FALLBACK = "sensor.aecc_battery_estimated_house_demand"
 _PV_POWER_ENTITY_FALLBACK = "sensor.aecc_battery_pv_power"
 
@@ -458,6 +461,70 @@ def _energy_dashboard_additional_solar_w(
     }
 
 
+def _available_pv_power_w(
+    hass: HomeAssistant,
+    coordinator: AeccBatteryCoordinator,
+    config_entry: ConfigEntry,
+) -> tuple[float, float | None, dict[str, Any]]:
+    """Return measured PV plus an optional uncurtailed availability estimate."""
+    aecc_pv_w = max(0.0, _as_float(coordinator.get_value("pv_power"), 0.0) or 0.0)
+    additional_pv_w, additional_context = _energy_dashboard_additional_solar_w(
+        hass,
+        coordinator,
+    )
+    measured_pv_w = aecc_pv_w + max(0.0, additional_pv_w)
+    entity_id = str(config_entry.options.get(CONF_AVAILABLE_PV_POWER_ENTITY) or "").strip()
+    estimate_w: float | None = None
+    estimate_status = "not_configured"
+    age_minutes: float | None = None
+    if entity_id:
+        state = hass.states.get(entity_id)
+        registry_entry = er.async_get(hass).async_get(entity_id)
+        self_reference = bool(
+            registry_entry is not None
+            and registry_entry.platform == DOMAIN
+            and registry_entry.config_entry_id == config_entry.entry_id
+            and registry_entry.unique_id == f"{config_entry.entry_id}_available_pv_power"
+        )
+        if self_reference:
+            estimate_status = "self_reference_rejected"
+        elif state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            estimate_status = "unavailable"
+        else:
+            age_minutes = max(
+                0.0,
+                (utcnow() - state.last_updated.astimezone(UTC)).total_seconds() / 60,
+            )
+            candidate_w = _state_power_w(hass, entity_id)
+            if candidate_w is None:
+                estimate_status = "invalid_unit_or_value"
+            elif age_minutes > _AVAILABLE_PV_STALE_AFTER.total_seconds() / 60:
+                estimate_status = "stale"
+            else:
+                estimate_w = max(0.0, candidate_w)
+                estimate_status = "active"
+    available_pv_w = max(measured_pv_w, estimate_w or 0.0)
+    source = (
+        "configured_available_pv_estimate"
+        if estimate_w is not None and estimate_w > measured_pv_w
+        else "measured_live_pv"
+    )
+    return available_pv_w, estimate_w, {
+        "source": source,
+        "available_pv_power_w": round(available_pv_w, 1),
+        "measured_pv_power_w": round(measured_pv_w, 1),
+        "aecc_pv_power_w": round(aecc_pv_w, 1),
+        "additional_solar_power_w": round(max(0.0, additional_pv_w), 1),
+        "configured_entity": entity_id or None,
+        "configured_estimate_w": round(estimate_w, 1) if estimate_w is not None else None,
+        "configured_estimate_status": estimate_status,
+        "configured_estimate_age_minutes": round(age_minutes, 1) if age_minutes is not None else None,
+        "stale_after_minutes": round(_AVAILABLE_PV_STALE_AFTER.total_seconds() / 60),
+        "house_coverage_margin_w": _AVAILABLE_PV_HOUSE_MARGIN_W,
+        "energy_dashboard_solar": additional_context,
+    }
+
+
 def _energy_dashboard_additional_solar_energy_kwh(
     hass: HomeAssistant,
     coordinator: AeccBatteryCoordinator,
@@ -651,6 +718,7 @@ async def async_setup_entry(
     entities.append(AeccAgileProposedPlanSensor(coordinator, config_entry, "current"))
     entities.append(AeccAgileProposedPlanSensor(coordinator, config_entry, "next"))
     entities.append(AeccAgileShadowOperatingStateSensor(coordinator, config_entry))
+    entities.append(AeccAvailablePvPowerSensor(coordinator, config_entry))
 
     entities.append(AeccEstimatedHouseDemandSensor(coordinator, config_entry))
     entities.append(AeccHouseDemandEnergySensor(coordinator, config_entry))
@@ -1149,12 +1217,18 @@ class AeccAgileShadowOperatingStateSensor(
         now_local = now_utc.astimezone(ZoneInfo(self.hass.config.time_zone))
         plan = self._current_plan()
         action = self._action_for_now(plan, now_local)
-        aecc_pv_power_w = _as_float(self.coordinator.get_value("pv_power"), 0.0) or 0.0
-        additional_pv_power_w, live_solar_context = _energy_dashboard_additional_solar_w(
+        available_pv_power_w, configured_available_pv_w, available_pv_context = _available_pv_power_w(
+            self.hass,
+            self.coordinator,
+            self._config_entry,
+        )
+        aecc_pv_power_w = float(available_pv_context["aecc_pv_power_w"])
+        additional_pv_power_w = float(available_pv_context["additional_solar_power_w"])
+        pv_power_w = float(available_pv_context["measured_pv_power_w"])
+        house_demand_power_w, house_demand_context = _estimate_house_demand_w(
             self.hass,
             self.coordinator,
         )
-        pv_power_w = max(0.0, aecc_pv_power_w) + max(0.0, additional_pv_power_w)
         total_charge_power_w = _as_float(self.coordinator.get_value("total_charge_power"), 0.0) or 0.0
         ac_charge_power_w = _as_float(self.coordinator.get_value("ac_charging_power"), 0.0) or 0.0
         inferred_pv_charge_w = max(0.0, total_charge_power_w - ac_charge_power_w)
@@ -1183,6 +1257,11 @@ class AeccAgileShadowOperatingStateSensor(
             cosy_daylight_flex_enabled=bool(
                 getattr(self.coordinator, "cosy_daylight_flex_enabled", False)
             ),
+            available_pv_power_w=(
+                available_pv_power_w if configured_available_pv_w is not None else None
+            ),
+            house_demand_power_w=house_demand_power_w,
+            available_pv_house_margin_w=_AVAILABLE_PV_HOUSE_MARGIN_W,
         )
         forecast_entries = self._solar_forecast_config_entries()
         decision.update(
@@ -1200,7 +1279,9 @@ class AeccAgileShadowOperatingStateSensor(
                 "solar_forecast_status": (
                     "configured_provider_hook" if forecast_entries else "historical_net_profile_fallback"
                 ),
-                "live_solar_context": live_solar_context,
+                "live_solar_context": available_pv_context["energy_dashboard_solar"],
+                "available_pv_context": available_pv_context,
+                "house_demand_context": house_demand_context,
                 "aecc_pv_power_w": round(max(0.0, aecc_pv_power_w), 1),
                 "additional_pv_power_w": round(max(0.0, additional_pv_power_w), 1),
                 "locked_action_count": len(self._locked_actions),
@@ -1645,6 +1726,45 @@ class AeccTotalBatteryOutputPowerSensor(CoordinatorEntity[AeccBatteryCoordinator
             return round(float(value), 1)
         except (TypeError, ValueError):
             return None
+
+
+class AeccAvailablePvPowerSensor(
+    AeccRecorderLeanMixin,
+    CoordinatorEntity[AeccBatteryCoordinator],
+    SensorEntity,
+):
+    """Best live estimate of PV power available even while AECC is curtailed."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Available PV Power"
+    _attr_icon = "mdi:solar-power-variant"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+
+    def __init__(self, coordinator: AeccBatteryCoordinator, config_entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._config_entry = config_entry
+        self._attr_unique_id = f"{config_entry.entry_id}_available_pv_power"
+        self._last_attributes: dict[str, Any] = {}
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return self.coordinator.device_info
+
+    @property
+    def native_value(self) -> float | None:
+        value, _estimate, attrs = _available_pv_power_w(
+            self.hass,
+            self.coordinator,
+            self._config_entry,
+        )
+        self._last_attributes = attrs
+        return round(value, 1)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return dict(self._last_attributes)
 
 
 class AeccEstimatedHouseDemandSensor(

@@ -11,6 +11,7 @@ CARD_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "frontend" / "aferi
 SELECT_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "select.py").read_text()
 SWITCH_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "switch.py").read_text()
 COORDINATOR_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "coordinator.py").read_text()
+CONFIG_FLOW_SOURCE = (ROOT / "custom_components" / "aecc_battery" / "config_flow.py").read_text()
 
 
 def test_sensor_applies_behavioral_source_validator_and_stale_guard() -> None:
@@ -40,6 +41,14 @@ def test_sensor_uses_charge_limit_for_plans_and_cache_invalidation() -> None:
     assert SENSOR_SOURCE.count("target_soc=charge_limit_soc") == 2
     assert 'plan["charge_limit_source"] = "Charge Limit slider / device register 3024"' in SENSOR_SOURCE
     assert "round(charge_limit_soc, 1)" in SENSOR_SOURCE
+
+
+def test_available_pv_source_is_configurable_and_used_by_shadow_control() -> None:
+    assert "CONF_AVAILABLE_PV_POWER_ENTITY" in CONFIG_FLOW_SOURCE
+    assert "AeccAvailablePvPowerSensor" in SENSOR_SOURCE
+    assert "_available_pv_power_w(" in SENSOR_SOURCE
+    assert "available_pv_power_w=" in SENSOR_SOURCE
+    assert "house_demand_power_w=" in SENSOR_SOURCE
 
 
 def test_sensor_replans_both_days_as_one_rolling_horizon_when_rates_exist() -> None:
@@ -189,6 +198,8 @@ def test_agile_card_surfaces_but_does_not_silently_enable_control() -> None:
     assert '"_cosy_daylight_flex"' in CARD_SOURCE
     assert '"Cosy Daylight Flex"' in CARD_SOURCE
     assert "daylight_flex_margin_minutes" in CARD_SOURCE
+    assert '"_available_pv_power"' in CARD_SOURCE
+    assert "Available PV power:" in CARD_SOURCE
     assert "slot_target_soc" in CARD_SOURCE
     assert "required_cover_kwh" in CARD_SOURCE
     assert "Capacity shortfall" in CARD_SOURCE
