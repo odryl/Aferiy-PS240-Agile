@@ -834,8 +834,7 @@ def build_agile_shadow_decision(
         "tariff_phase": action.get("tariff_phase"),
     }
 
-    inferred_pv_charge_w = max(0.0, total_charge_power_w - ac_charge_power_w)
-    solar_active = max(0.0, pv_power_w) >= 50 or inferred_pv_charge_w >= 50
+    solar_active = max(0.0, pv_power_w) >= 50
     available_pv_covers_house = bool(
         isinstance(available_pv_power_w, int | float)
         and isinstance(house_demand_power_w, int | float)
@@ -978,7 +977,7 @@ def build_agile_shadow_decision(
             "Self-Gen/Zero Export",
             "Useful PV is already charging the site; preserve solar headroom instead of starting grid charge.",
             charge_inhibited_reason="useful_pv_present",
-            inferred_pv_charge_w=round(inferred_pv_charge_w, 1),
+            solar_detection_source="measured_live_pv",
             **action_attrs,
         )
     if action_name == "charge":

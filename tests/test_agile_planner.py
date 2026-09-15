@@ -284,6 +284,31 @@ def test_shadow_decision_preserves_solar_and_uses_locked_actions() -> None:
     assert solar["control_enabled"] is False
 
 
+def test_total_charge_without_measured_pv_does_not_defer_grid_charge() -> None:
+    now = datetime(2026, 8, 24, 2, 0, tzinfo=ZoneInfo("Europe/London"))
+    decision = AGILE.build_agile_shadow_decision(
+        {"status": "proposed", "slots": []},
+        now=now,
+        connection_fresh=True,
+        soc_percent=40,
+        reserve_soc=15,
+        pv_power_w=0,
+        total_charge_power_w=600,
+        ac_charge_power_w=0,
+        pv_quiet_minutes=20,
+        locked_action={
+            "start": now.isoformat(),
+            "end": (now + timedelta(minutes=30)).isoformat(),
+            "action": "charge",
+            "command_power_limit_w": 1200,
+        },
+    )
+
+    assert decision["pv_power_w"] == 0
+    assert decision["state"] == "Planned Charge"
+    assert decision["recommended_operating_mode"] == "Charge"
+
+
 def test_shadow_decision_holds_only_after_solar_is_quiet() -> None:
     now = datetime(2026, 8, 24, 19, 0, tzinfo=ZoneInfo("Europe/London"))
     plan = {

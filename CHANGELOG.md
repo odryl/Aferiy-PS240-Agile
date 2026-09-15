@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.28
+
+- Fix false **Solar Charge Deferred** decisions when PV is 0 W. The planner
+  no longer assumes that a difference between asynchronous total-charge and
+  AC-charge registers must be solar power.
+- Require at least 50 W of measured live PV, including valid Energy Dashboard
+  solar power sources, before solar can defer a planned grid charge.
+
 ## 1.8.27
 
 - Change **Cosy Daylight Flex** to remain Idle while the live Charge Limit

@@ -1231,8 +1231,7 @@ class AeccAgileShadowOperatingStateSensor(
         )
         total_charge_power_w = _as_float(self.coordinator.get_value("total_charge_power"), 0.0) or 0.0
         ac_charge_power_w = _as_float(self.coordinator.get_value("ac_charging_power"), 0.0) or 0.0
-        inferred_pv_charge_w = max(0.0, total_charge_power_w - ac_charge_power_w)
-        solar_active = pv_power_w >= 50 or inferred_pv_charge_w >= 50
+        solar_active = pv_power_w >= 50
         if solar_active:
             self._pv_quiet_since = None
         elif self._pv_quiet_since is None:
