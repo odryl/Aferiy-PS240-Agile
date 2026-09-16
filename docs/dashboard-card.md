@@ -1,5 +1,11 @@
 # Dashboard Card
 
+<img src="images/card.png" alt="Cosy Octopus plan card next to live battery telemetry tiles and the Wi-Fi loss recovery card" width="820">
+
+*A live dashboard: the Cosy Octopus plan card, live battery telemetry, and the
+Wi-Fi loss recovery card. See [Cosy planner](COSY_PLANNER.md) for the plan card
+itself.*
+
 The integration includes a reusable Lovelace card for the smart overnight plan.
 It shows target SOC, battery capacity, day balance, Pre-Sunrise Need,
 Post-Sunset Need, useful solar, confidence, and SMART History completeness.
@@ -9,7 +15,7 @@ Post-Sunset Need, useful solar, confidence, and SMART History completeness.
 After installing or updating the integration and restarting Home Assistant, add this dashboard resource:
 
 ```text
-/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.30
+/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.31
 ```
 
 Set the resource type to:
@@ -49,7 +55,7 @@ The card reads the calculation from the Recommended Overnight SOC sensor. It doe
 The separate guarded recovery card is available at:
 
 ```text
-/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.30
+/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.31
 ```
 
 After registering it as a JavaScript module, add **AFERIY Wi-Fi Loss Recovery**
@@ -68,7 +74,7 @@ receives or displays router credentials or Wi-Fi passphrases.
 
 ## Cosy Octopus Battery Plan
 
-Register `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.30` as a JavaScript
+Register `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.31` as a JavaScript
 module and use `type: custom:aferiy-agile-plan-card`. Selecting Cosy Octopus in
 the integration selects the compact Cosy layout automatically.
 
@@ -84,5 +90,91 @@ The card does not calculate charge targets or send battery mode commands. The
 controller's inhibition and error reasons remain visible. Agile retains its
 existing half-hour schedule.
 
+A booked **Weekend Happy Hour** is rendered as its own period, highlighted with
+the free-power label instead of a tariff band, because Octopus credits that
+import back rather than changing the unit rate. The row reads
+*Free power · charge to N%* with the credited-back amount in place of a cost.
+See [Weekend Happy Hours](../README.md#weekend-happy-hours) for the required
+Octopus Energy power-up events entity.
+
 After upgrading, restart Home Assistant, update the resource version, and refresh
 the dashboard. Existing YAML remains compatible.
+
+## Plan card dashboard setup
+
+After installing or updating the integration, restart Home Assistant before
+adding the dashboard so the bundled card file is available.
+
+### 1. Register the card resource
+
+1. Go to **Settings → Dashboards**.
+2. Open the top-right three-dot menu and select **Resources**.
+3. Select **Add resource**.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.31`.
+5. Select **JavaScript module** and save.
+6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
+
+If an older version of the resource already exists, edit its URL instead of
+adding a duplicate.
+
+### 2. Create a dedicated dashboard
+
+1. Go to **Settings → Dashboards** and select **Add dashboard**.
+2. Choose **New dashboard from scratch**.
+3. Suggested settings:
+   - Title: `AFERIY Energy`
+   - Icon: `mdi:battery-clock`
+   - Show in sidebar: enabled
+4. Open the new dashboard and select the edit/pencil button.
+5. If prompted, open the three-dot menu and select **Take control**.
+
+### 3. Add the plan card
+
+1. While editing the dashboard, select **Add card**.
+2. Choose **By card** and search for **AFERIY Agile Battery Plan**.
+3. Add the card and save the dashboard.
+4. In a Sections dashboard, use the card's **Layout** tab to make it full
+   width.
+
+If the card is not listed, add a **Manual** card containing:
+
+```yaml
+type: custom:aferiy-agile-plan-card
+title: Octopus Agile Battery Plan
+```
+
+The card automatically finds the plan sensors when there is only one AFERIY
+system. If more than one integration entry exists, identify them explicitly:
+
+```yaml
+type: custom:aferiy-agile-plan-card
+title: Octopus Agile Battery Plan
+today_entity: sensor.your_battery_agile_proposed_plan_today
+tomorrow_entity: sensor.your_battery_agile_proposed_plan_tomorrow
+shadow_entity: sensor.your_battery_agile_shadow_operating_state
+control_entity: switch.your_battery_agile_automated_control
+cosy_control_entity: switch.your_battery_cosy_automated_control
+```
+
+Find the exact entity IDs under **Developer Tools → States** by searching for
+`agile_proposed_plan`, `agile_shadow_operating_state`, or
+`agile_automated_control`.
+
+### 4. Add live battery status (optional)
+
+Add an **Entities** or **Tile** card above the plan and select useful entities
+from the AFERIY device, such as:
+
+- System Average Battery SOC
+- Total Battery Output Power
+- AC Charging Power
+- Battery Discharging Power
+- Grid Import/Export
+- Agile Automated Control (Agile only; keep Off until deliberately testing)
+- Cosy Automated Control (Cosy only; keep Off until deliberately testing)
+- Cosy Daylight Flex (optional 13:00-16:00 PV-first, just-in-time charging)
+- Connection Status
+
+The separate **AFERIY Overnight Plan** card describes the inherited
+fixed-window scheduler. Do not add it to a planner dashboard unless you switch
+to a fixed-window tariff.

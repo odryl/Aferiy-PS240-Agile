@@ -16,9 +16,20 @@ _DEFAULT_MINIMUM_SAVING_GBP_PER_KWH = 0.03
 _REQUIRED_SOURCE_ATTRIBUTES = ("mpan", "serial_number", "tariff_code")
 _PLANNER_REVISION = 3
 _SHADOW_DECISION_REVISION = 1
-_COSY_SCHEDULE_REVISION = 4
+_COSY_SCHEDULE_REVISION = 5
 _COSY_MAX_BATTERY_OUTPUT_W = 850
 _COSY_DAYLIGHT_FLEX_COMMAND_MARGIN_MINUTES = 2
+# BottlecapDave's Octopus Energy integration exposes joined and available
+# power-up sessions (including WEEKEND_HAPPY_HOUR events) on a single event
+# entity. The entity ships disabled by default, so discovery is best-effort and
+# the plan simply omits free windows when it is absent.
+OCTOPUS_POWER_UP_EVENTS_SUFFIX = "_octoplus_power_up_events"
+OCTOPUS_HAPPY_HOUR_EVENT_TYPE = "WEEKEND_HAPPY_HOUR"
+# The event entity flattens power-up and Happy Hour sessions together without an
+# event type, so a code that names a different session type is skipped instead.
+_NON_HAPPY_HOUR_CODE_MARKERS = ("TURN_UP", "TURN_DOWN", "POWER_UP", "POWER_DOWN", "FREE_ELECTRICITY")
+_EVENT_LIST_ATTRIBUTES = ("available_events", "events")
+_EVENT_TIMESTAMP_ATTRIBUTES = ("start", "end")
 
 
 def validate_octopus_rate_source(
@@ -124,6 +135,165 @@ def _next_half_hour_boundary(moment: datetime) -> datetime:
     if remainder:
         rounded += timedelta(minutes=30 - remainder)
     return rounded
+
+
+def _coerce_state_attributes(state: Any) -> Mapping[str, Any] | None:
+    """Return entity state attributes from a Home Assistant State or a plain mapping."""
+    if state is None:
+        return None
+    attributes = getattr(state, "attributes", None)
+    if isinstance(attributes, Mapping):
+        return attributes
+    if isinstance(state, Mapping):
+        inner = state.get("attributes")
+        return inner if isinstance(inner, Mapping) else state
+    return None
+
+
+def _coerce_event_moment(value: Any, local_zone: ZoneInfo) -> datetime | None:
+    """Parse a power-up event timestamp, assuming local time when it has no offset."""
+    if isinstance(value, datetime):
+        moment = value
+    elif isinstance(value, str):
+        try:
+            moment = datetime.fromisoformat(value.strip())
+        except ValueError:
+            return None
+    else:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=local_zone)
+    return moment.astimezone(UTC)
+
+
+def parse_power_up_events(
+    state: Any,
+    *,
+    timezone: str,
+    event_type: str = OCTOPUS_HAPPY_HOUR_EVENT_TYPE,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Extract free-electricity windows from an Octopus power-up events entity.
+
+    BottlecapDave's integration publishes joined sessions under ``events`` and
+    bookable ones under ``available_events``. Both carry the event code, the
+    start/end timestamps and the duration, but not the event type, so the event
+    type is inferred from the code when it carries one and otherwise assumed.
+    Because that inference can only ever be a guess, anything it discards is
+    reported through the second return value rather than dropped silently.
+    """
+    try:
+        local_zone = ZoneInfo(timezone)
+    except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError):
+        return [], ["The configured timezone is invalid."]
+
+    attributes = _coerce_state_attributes(state)
+    if attributes is None:
+        return [], []
+
+    warnings: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    sessions: list[dict[str, Any]] = []
+    skipped_codes: list[str] = []
+    for attribute in _EVENT_LIST_ATTRIBUTES:
+        raw_events = attributes.get(attribute)
+        if not isinstance(raw_events, (list, tuple)):
+            continue
+        for raw_event in raw_events:
+            if not isinstance(raw_event, Mapping):
+                continue
+            event_code = str(raw_event.get("code") or "").strip()
+            if event_type == OCTOPUS_HAPPY_HOUR_EVENT_TYPE and event_code:
+                code_upper = event_code.upper()
+                if any(marker in code_upper for marker in _NON_HAPPY_HOUR_CODE_MARKERS):
+                    skipped_codes.append(event_code)
+                    continue
+            moments = [
+                _coerce_event_moment(raw_event.get(key), local_zone)
+                for key in _EVENT_TIMESTAMP_ATTRIBUTES
+            ]
+            if any(moment is None for moment in moments):
+                warnings.append("A Happy Hour event was skipped because its start or end time was unreadable.")
+                continue
+            session_start, session_end = moments
+            if session_start >= session_end:
+                warnings.append("A Happy Hour event was skipped because its end time is not after its start.")
+                continue
+            key = (session_start.isoformat(), session_end.isoformat())
+            if key in seen:
+                continue
+            seen.add(key)
+            sessions.append(
+                {
+                    "code": event_code or None,
+                    "start": session_start.isoformat(),
+                    "end": session_end.isoformat(),
+                    "duration_minutes": round((session_end - session_start).total_seconds() / 60, 1),
+                }
+            )
+
+    sessions.sort(key=lambda session: session["start"])
+    if skipped_codes:
+        warnings.append(
+            "These sessions were not planned as Happy Hours because their codes name a "
+            "different session type: "
+            + ", ".join(sorted(set(skipped_codes)))
+        )
+    return sessions, warnings
+
+
+def resolve_happy_hour_windows(
+    sessions: list[Mapping[str, Any]],
+    *,
+    expected_date: date,
+    timezone: str,
+) -> list[dict[str, Any]]:
+    """Clip parsed free-energy sessions to the local planning day they fall in."""
+    try:
+        local_zone = ZoneInfo(timezone)
+    except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError):
+        return []
+    day_start = datetime.combine(expected_date, time.min, tzinfo=local_zone)
+    day_end = datetime.combine(expected_date + timedelta(days=1), time.min, tzinfo=local_zone)
+
+    windows: list[dict[str, Any]] = []
+    for session in sessions:
+        if not isinstance(session, Mapping):
+            continue
+        window_start = _coerce_event_moment(session.get("start"), local_zone)
+        window_end = _coerce_event_moment(session.get("end"), local_zone)
+        if window_start is None or window_end is None or window_start >= window_end:
+            continue
+        clipped_start = max(window_start, day_start.astimezone(UTC))
+        clipped_end = min(window_end, day_end.astimezone(UTC))
+        if clipped_start >= clipped_end:
+            continue
+        windows.append(
+            {
+                "start": clipped_start.isoformat(),
+                "end": clipped_end.isoformat(),
+                "local_start": clipped_start.astimezone(local_zone).strftime("%H:%M"),
+                "local_end": clipped_end.astimezone(local_zone).strftime("%H:%M"),
+                "duration_minutes": round((clipped_end - clipped_start).total_seconds() / 60, 1),
+                "code": session.get("code"),
+            }
+        )
+    return windows
+
+
+def _happy_hour_window_for_slot(
+    slot_start: datetime,
+    slot_end: datetime,
+    windows: list[Mapping[str, Any]],
+) -> Mapping[str, Any] | None:
+    """Return the free-energy window overlapping a slot, if any."""
+    for window in windows:
+        window_start = _coerce_event_moment(window.get("start"), UTC)
+        window_end = _coerce_event_moment(window.get("end"), UTC)
+        if window_start is None or window_end is None:
+            continue
+        if window_start < slot_end and window_end > slot_start:
+            return window
+    return None
 
 
 def _validate_actionable_coverage(
@@ -513,6 +683,8 @@ def build_agile_day_plan(
         "status": status,
         "reason": reason,
         "planner_revision": _PLANNER_REVISION,
+        "charge_efficiency": charge_efficiency,
+        "discharge_efficiency": discharge_efficiency,
         "date": day.isoformat(),
         "timezone": timezone,
         "rate_unit": "GBP/kWh",
@@ -596,12 +768,18 @@ def apply_cosy_rate_schedule(
     plan: Mapping[str, Any],
     *,
     max_battery_output_w: int = _COSY_MAX_BATTERY_OUTPUT_W,
+    happy_hour_windows: list[Mapping[str, Any]] | None = None,
+    happy_hour_entity_id: str | None = None,
 ) -> dict[str, Any]:
     """Apply Cosy's fixed daily operating phases to a validated rate plan.
 
     Cheap periods are armed for charging to the configured target. The live
     decision layer changes that to Idle once the target is reached, and still
     gives useful PV priority during the afternoon cheap period.
+
+    Booked Octopus Weekend Happy Hour windows are overlaid as free energy: every
+    slot the window touches charges towards the configured target regardless of
+    the tariff band, because imported energy in that window is credited back.
     """
     scheduled = dict(plan)
     if scheduled.get("status") not in ("proposed", "limited"):
@@ -659,7 +837,7 @@ def apply_cosy_rate_schedule(
         return 8, "04:00 next day"
 
     slots: list[dict[str, Any]] = []
-    phase_counts = {"cheap_charge": 0, "self_gen": 0}
+    phase_counts = {"cheap_charge": 0, "self_gen": 0, "free_energy": 0}
     for raw_slot in scheduled.get("slots", []):
         if not isinstance(raw_slot, Mapping):
             continue
@@ -670,8 +848,31 @@ def apply_cosy_rate_schedule(
             return _invalid_plan("A Cosy plan slot has an invalid local start time.")
         minute = local_start.hour * 60 + local_start.minute
         economic_action = str(slot.get("action") or "hold")
+        free_window = _happy_hour_window_for_slot(
+            datetime.fromisoformat(str(slot["start"])).astimezone(UTC),
+            datetime.fromisoformat(str(slot["end"])).astimezone(UTC),
+            happy_hour_windows or [],
+        )
 
-        if 240 <= minute < 420 or 780 <= minute < 960 or 1320 <= minute:
+        if free_window is not None:
+            # Octopus credits the energy imported during a booked Happy Hour, so
+            # the whole slot is treated as zero-cost and charges to the target.
+            action = "charge"
+            phase = "free_energy"
+            rate_band = "free"
+            cover_slots, cover_until = cheap_period_cover(1320)
+            required_cover_kwh = cover_slots * max_output_per_slot_kwh
+            required_target_soc = min(
+                configured_target_soc,
+                float(ceil(reserve_soc + required_cover_kwh / capacity_kwh * 100)),
+            )
+            maximum_usable_kwh = capacity_kwh * max(0.0, configured_target_soc - reserve_soc) / 100
+            cover_shortfall_kwh = max(0.0, required_cover_kwh - maximum_usable_kwh)
+            command_power_limit_w = int(
+                scheduled.get("max_system_charge_power_w") or _SAFE_AGILE_CHARGE_POWER_CEILING_W
+            )
+            duration_minutes = 30.0
+        elif 240 <= minute < 420 or 780 <= minute < 960 or 1320 <= minute:
             action = "charge"
             phase = "cheap_charge"
             rate_band = "cheap"
@@ -718,7 +919,7 @@ def apply_cosy_rate_schedule(
                 "duration_minutes": duration_minutes,
             }
         )
-        if phase == "cheap_charge":
+        if phase in ("cheap_charge", "free_energy"):
             slot.update(
                 {
                     "slot_target_soc": round(required_target_soc, 1),
@@ -728,6 +929,15 @@ def apply_cosy_rate_schedule(
                     "cover_shortfall_kwh": round(cover_shortfall_kwh, 3),
                 }
             )
+            if phase == "free_energy" and free_window is not None:
+                slot.update(
+                    {
+                        "free_energy_window_start": free_window.get("start"),
+                        "free_energy_window_end": free_window.get("end"),
+                        "free_energy_event_code": free_window.get("code"),
+                        "free_energy_rate_credited": True,
+                    }
+                )
         slots.append(slot)
 
     cosy_periods: list[dict[str, Any]] = []
@@ -791,12 +1001,18 @@ def apply_cosy_rate_schedule(
         period["minimum_rate_gbp_per_kwh"] = round(min(rates), 5)
         period["maximum_rate_gbp_per_kwh"] = round(max(rates), 5)
 
+    free_energy_windows = [dict(window) for window in (happy_hour_windows or [])]
     scheduled.update(
         {
             "status": "proposed",
             "reason": (
                 "Cosy schedule: charge to target in the three cheap periods and use "
                 "CT-controlled Self-Gen/Zero Export between them, including 00:00-04:00."
+                + (
+                    " Booked Weekend Happy Hour windows are charged as free energy."
+                    if phase_counts["free_energy"]
+                    else ""
+                )
             ),
             "economic_plan_status": scheduled.get("status"),
             "economic_plan_reason": scheduled.get("reason"),
@@ -807,18 +1023,125 @@ def apply_cosy_rate_schedule(
             "scheduled_charge_periods": phase_counts["cheap_charge"],
             "scheduled_idle_periods": 0,
             "scheduled_self_gen_periods": phase_counts["self_gen"],
+            "scheduled_free_energy_periods": phase_counts["free_energy"],
             "cosy_period_count": len(cosy_periods),
             "cosy_periods": cosy_periods,
+            "happy_hour_windows": free_energy_windows,
+            "happy_hour_entity_id": happy_hour_entity_id,
             "schedule_note": (
                 "Each cheap period charges only to the SOC needed to cover the next "
                 f"non-cheap block at up to {max_output_w} W ("
                 f"{max_output_per_slot_kwh:.3f} kWh per half-hour). Between cheap periods, "
                 "Self-Gen supplies the house down to the configured reserve; a cheap period "
                 "holds Idle once its target is reached."
+                + (
+                    " A booked Octopus Weekend Happy Hour is treated as free energy: the slots "
+                    "it touches charge towards the configured target even outside a cheap "
+                    "period, because the imported energy is credited back by Octopus."
+                    if phase_counts["free_energy"]
+                    else ""
+                )
             ),
             "slots": slots,
         }
     )
+    return _project_cosy_schedule(scheduled)
+
+
+def _project_cosy_schedule(scheduled: dict[str, Any]) -> dict[str, Any]:
+    """Project the actual fixed schedule, starting now, without inventing elapsed energy."""
+    zone = ZoneInfo(scheduled["timezone"])
+    day = date.fromisoformat(scheduled["date"])
+    now = datetime.fromisoformat(scheduled["planning_time"]).astimezone(UTC)
+    capacity = float(scheduled["battery_capacity_kwh"])
+    reserve = capacity * float(scheduled["reserve_soc"]) / 100
+    stored = capacity * float(scheduled["starting_soc"]) / 100
+    charge_eff = float(scheduled.get("charge_efficiency", 0.90))
+    discharge_eff = float(scheduled.get("discharge_efficiency", 0.95))
+    charge_kw = float(scheduled["max_system_charge_power_w"]) / 1000
+    output_kw = float(scheduled["cosy_max_battery_output_w"]) / 1000
+    ready = datetime.combine(day, time.fromisoformat(scheduled["ready_by"]), tzinfo=zone).astimezone(UTC)
+    protected = datetime.combine(day, time.fromisoformat(scheduled["protected_until"]), tzinfo=zone).astimezone(UTC)
+    ready_soc = None if now > ready else stored / capacity * 100
+    end_soc = None if now > protected else stored / capacity * 100
+    grid = discharged = cost = avoided = free_energy = free_credit = 0.0
+    shortfall = 0.0
+    future_cheap = [
+        float(s["rate_gbp_per_kwh"])
+        for s in scheduled["slots"]
+        if s["action"] == "charge"
+        and s.get("tariff_phase") != "free_energy"
+        and datetime.fromisoformat(s["end"]).astimezone(UTC) > now
+    ]
+    replacement_rate = sum(future_cheap) / len(future_cheap) if future_cheap else None
+    for slot in scheduled["slots"]:
+        start = datetime.fromisoformat(slot["start"]).astimezone(UTC)
+        end = datetime.fromisoformat(slot["end"]).astimezone(UTC)
+        hours = max(0.0, (end - max(start, now)).total_seconds() / 3600)
+        before = stored
+        energy = charge_cost = avoided_cost = slot_credit = 0.0
+        is_free_charge = slot.get("tariff_phase") == "free_energy"
+        if hours > 0:
+            if slot["action"] == "charge":
+                target = capacity * float(slot["slot_target_soc"]) / 100
+                energy = min(charge_kw * hours, max(0.0, target - stored) / charge_eff)
+                stored += energy * charge_eff
+                grid += energy
+                if is_free_charge:
+                    # Octopus credits this import back, so the grid energy is real
+                    # but the cost is not, and it must not set the replacement rate.
+                    free_energy += energy
+                    slot_credit = energy * float(slot["rate_gbp_per_kwh"])
+                    free_credit += slot_credit
+                    slot["credited_back_gbp"] = round(slot_credit, 6)
+                else:
+                    charge_cost = energy * float(slot["rate_gbp_per_kwh"])
+                    cost += charge_cost
+                if end.astimezone(zone).strftime("%H:%M") in ("07:00", "16:00", "00:00"):
+                    shortfall += max(0.0, target - stored)
+            else:
+                # expected_house_load_kwh is a half-hour net-load estimate, not a power command.
+                demand = max(0.0, float(slot.get("expected_house_load_kwh", output_kw / 2))) * hours / 0.5
+                energy = min(output_kw * hours, demand, max(0.0, stored - reserve) * discharge_eff)
+                stored -= energy / discharge_eff
+                discharged += energy
+                avoided_cost = energy * float(slot["rate_gbp_per_kwh"])
+                avoided += avoided_cost
+            if now <= ready and start < ready <= end:
+                fraction = max(0.0, (ready - max(start, now)).total_seconds()) / (hours * 3600)
+                ready_soc = (before + (stored - before) * min(1.0, fraction)) / capacity * 100
+            if now <= protected and start < protected <= end:
+                fraction = max(0.0, (protected - max(start, now)).total_seconds()) / (hours * 3600)
+                end_soc = (before + (stored - before) * min(1.0, fraction)) / capacity * 100
+        replacement = energy * replacement_rate / charge_eff / discharge_eff if slot["action"] != "charge" and replacement_rate is not None else 0.0
+        slot.update(energy_kwh=round(energy, 6), power_w=round(energy / hours * 1000) if hours else 0,
+                    charge_cost_gbp=round(charge_cost, 6), avoided_import_cost_gbp=round(avoided_cost, 6),
+                    replacement_cost_gbp=round(replacement, 6),
+                    net_saving_gbp=round(avoided_cost - replacement + slot_credit, 6),
+                    projected_end_soc=round(stored / capacity * 100, 2), actionable_minutes=round(hours * 60, 2))
+    replacement_cost = discharged * replacement_rate / charge_eff / discharge_eff if replacement_rate is not None else None
+    paid_grid = grid - free_energy
+    scheduled.update(
+        projection_basis="cosy_fixed_schedule_from_planning_time", estimate_scope="remaining_day",
+        projected_soc_at_ready_by=round(ready_soc, 1) if ready_soc is not None else None,
+        projected_soc_at_protection_end=round(end_soc, 1) if end_soc is not None else None,
+        projected_soc_at_day_end=round(stored / capacity * 100, 1),
+        planned_grid_charge_kwh=round(grid, 3), planned_stored_charge_kwh=round(grid * charge_eff, 3),
+        happy_hour_grid_charge_kwh=round(free_energy, 3),
+        estimated_happy_hour_credit_gbp=round(free_credit, 2),
+        planned_discharge_kwh=round(discharged, 3), estimated_grid_charge_cost_gbp=round(cost, 2),
+        estimated_avoided_import_cost_gbp=round(avoided, 2),
+        estimated_discharge_replacement_cost_gbp=round(replacement_cost, 2) if replacement_cost is not None else None,
+        estimated_net_saving_gbp=round(avoided - replacement_cost, 2) if replacement_cost is not None else None,
+        average_planned_charge_rate_gbp_per_kwh=cost / paid_grid if paid_grid else None,
+        delivered_replacement_cost_gbp_per_kwh=replacement_rate / charge_eff / discharge_eff if replacement_rate is not None else None,
+        replacement_rate_source="cosy_remaining_cheap_average", charge_target_shortfall_kwh=round(shortfall, 3),
+        cost_estimate_note="Remaining-day fixed-schedule estimate, not measured savings or a complete bill. Solar deferrals can change grid charging. Net value is avoided import minus replacement energy at the mean remaining cheap rate; charging cost is shown separately. Happy Hour import is counted at the local unit rate as a credited-back estimate, not as a billed cost. Past SOC projections are unavailable.",
+    )
+    for period in scheduled["cosy_periods"]:
+        members = [s for s in scheduled["slots"] if period["start"] <= s["start"] < period["end"]]
+        period["planned_energy_kwh"] = round(sum(s["energy_kwh"] for s in members), 3)
+        period["projected_end_soc"] = members[-1]["projected_end_soc"] if members else None
     return scheduled
 
 

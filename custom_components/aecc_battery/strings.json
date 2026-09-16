@@ -64,7 +64,8 @@
           "dependency_solcast_confirmed": "1. Solcast installed",
           "dependency_home_occupancy_confirmed": "2. Home Occupancy enabled",
           "wifi_loss_recovery_router_host": "Wi-Fi loss recovery · Linksys router address",
-          "wifi_loss_recovery_router_password": "Wi-Fi loss recovery · Local router administrator password"
+          "wifi_loss_recovery_router_password": "Wi-Fi loss recovery · Local router administrator password",
+          "agile_happy_hour_events_entity": "Octopus Weekend Happy Hours power-up event"
         },
         "data_description": {
           "advanced_energy_sensors": "Adds optional estimate sensors that can use solar forecast, tariff, occupancy, and household demand data. Leave disabled for the clean core battery integration.",
@@ -82,7 +83,8 @@
           "dependency_solcast_confirmed": "Tick once Solcast PV Forecast is installed. Used for timed solar forecasts and solar-aware estimates.",
           "dependency_home_occupancy_confirmed": "Tick once home occupancy is enabled. Uses Home Assistant's zone.home occupancy count so empty-house periods do not train the normal demand profile.",
           "wifi_loss_recovery_router_host": "Local Linksys router address, normally 192.168.0.1. Credentials are used only by Home Assistant on your LAN.",
-          "wifi_loss_recovery_router_password": "The local router administrator password, not the Linksys cloud-account password. Configure this before enabling the Wi-Fi Loss Recovery switch."
+          "wifi_loss_recovery_router_password": "The local router administrator password, not the Linksys cloud-account password. Configure this before enabling the Wi-Fi Loss Recovery switch.",
+          "agile_happy_hour_events_entity": "Optional BottlecapDave Octopus Energy power-up session events entity. Enable it in Home Assistant first (it ships disabled), then plan Cosy Weekend Happy Hours as free energy windows. Leave empty for automatic discovery when exactly one exists."
         }
       }
     },

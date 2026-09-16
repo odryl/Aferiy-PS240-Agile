@@ -97,4 +97,52 @@ test('ambiguous control discovery never picks another battery switch',()=>{
   f.card.hass=f.hass;assert.equal(f.card._findSwitch(null,'_cosy_automated_control','Cosy Automated Control').entity_id,f.control.entity_id);
   f.card.setConfig({cosy_control_entity:'switch.missing'});assert.match(f.html(),/Control unavailable/);
 });
+
+test('booked Weekend Happy Hours render as credited free power',()=>{
+  const f=fixture();
+  // 18:00 today falls inside the 16:00-22:00 peak block, so it renders in the
+  // upcoming list and must visibly replace peak-protection behaviour.
+  const freePeriod={start:'2026-09-16T18:00:00+01:00',end:'2026-09-16T19:00:00+01:00',local_start:'18:00',local_end:'19:00',action:'charge',tariff_phase:'free_energy',cosy_rate_band:'free',slot_target_soc:80,rate_gbp_per_kwh:.379,cover_until:'22:00'};
+  f.today.attributes.cosy_periods=[...f.today.attributes.cosy_periods,freePeriod].sort((a,b)=>a.local_start.localeCompare(b.local_start));
+  f.today.attributes.slots=[{...freePeriod,energy_kwh:.6,charge_cost_gbp:0,credited_back_gbp:.23,net_saving_gbp:.23}];
+  f.today.attributes.scheduled_free_energy_periods=1;
+  f.today.attributes.happy_hour_grid_charge_kwh=.6;
+  f.today.attributes.estimated_happy_hour_credit_gbp=.23;
+  f.card.hass=f.hass;
+  const html=f.html();
+  assert.match(html,/18:00–19:00/);
+  assert.match(html,/Free power · charge to 80%/);
+  assert.match(html,/Octopus Weekend Happy Hour · import credited back/);
+  assert.match(html,/free power/);
+  // 18:00-19:00 is carved out of the peak block as its own free row, while the
+  // remaining 16:00-18:00 peak protection row is untouched.
+  const peakRows=(html.match(/Peak protection · zero export/g)||[]).length;
+  assert.equal(peakRows,1);
+  assert.match(html,/18:00–19:00[\s\S]{0,260}Free power/);
+});
+test('Happy Hour credit and parser warnings surface in the plan details',()=>{
+  const f=fixture();
+  f.today.attributes.happy_hour_grid_charge_kwh=1.18;
+  f.today.attributes.estimated_happy_hour_credit_gbp=.53;
+  f.today.attributes.happy_hour_source='octopus_power_up_events_entity';
+  f.today.attributes.happy_hour_warnings=['These sessions were not planned as Happy Hours because their codes name a different session type: TURN_UP-9'];
+  f.card.hass=f.hass;
+  const details=f.card._cosyDetails(f.today.attributes,null);
+  assert.match(details,/Happy Hour grid charge/);
+  assert.match(details,/1.18 kWh/);
+  assert.match(details,/53p|£0.53/);
+  assert.match(details,/capped at 16 kWh per hour/);
+  assert.match(details,/TURN_UP-9/);
+  // Without a free window the Happy Hour rows must not appear at all.
+  const plain=f.card._cosyDetails({...f.today.attributes,happy_hour_grid_charge_kwh:0,estimated_happy_hour_credit_gbp:0,happy_hour_warnings:[]},null);
+  assert.doesNotMatch(plain,/Happy Hour grid charge/);
+});
+test('no Happy Hours still shows the plain Cosy tariff bands',()=>{
+  const f=fixture();
+  assert.match(f.html(),/cheap · \/kWh/);
+  assert.match(f.html(),/peak · \/kWh/);
+  assert.doesNotMatch(f.html(),/free power/);
+  assert.doesNotMatch(f.html(),/Weekend Happy Hour/);
+});
+
 module.exports={fixture};

@@ -8,7 +8,7 @@ import math
 import os
 import time
 from collections import deque
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -33,10 +33,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util.dt import utcnow
 
 from .agile import (
+    OCTOPUS_POWER_UP_EVENTS_SUFFIX,
     apply_cosy_rate_schedule,
     build_agile_day_plan,
     build_agile_shadow_decision,
     cosy_period_action,
+    parse_power_up_events,
+    resolve_happy_hour_windows,
     validate_octopus_rate_source,
 )
 from .const import (
@@ -45,6 +48,7 @@ from .const import (
     AGILE_MAX_SYSTEM_CHARGE_POWER_W,
     AGILE_MAX_SYSTEM_DISCHARGE_POWER_W,
     CONF_AGILE_CURRENT_DAY_RATES_ENTITY,
+    CONF_AGILE_HAPPY_HOUR_EVENTS_ENTITY,
     CONF_AGILE_NEXT_DAY_RATES_ENTITY,
     CONF_AGILE_PLANNER_ENABLED,
     CONF_AGILE_PROTECTED_UNTIL,
@@ -776,6 +780,61 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
         ):
             self._cached_plan_key = None
             self.async_write_ha_state()
+        elif entity_id == self._happy_hour_entity_id() or entity_id.endswith(OCTOPUS_POWER_UP_EVENTS_SUFFIX):
+            # A booked or newly released Happy Hour changes the free windows, so
+            # the cached plan has to be rebuilt even though the rates are unchanged.
+            self._cached_plan_key = None
+            self.async_write_ha_state()
+
+    def _happy_hour_entity_id(self) -> str | None:
+        """Resolve the Octopus power-up events entity that carries Happy Hours."""
+        return self._happy_hour_source()[0]
+
+    def _happy_hour_source(self) -> tuple[str | None, str]:
+        """Resolve the Happy Hour entity and explain how it was resolved."""
+        configured = str(
+            self._config_entry.options.get(CONF_AGILE_HAPPY_HOUR_EVENTS_ENTITY) or ""
+        ).strip()
+        if configured:
+            return configured, "configured"
+        matches = sorted(
+            state.entity_id
+            for state in self.hass.states.async_all("event")
+            if state.entity_id.endswith(OCTOPUS_POWER_UP_EVENTS_SUFFIX)
+        )
+        if len(matches) == 1:
+            return matches[0], "discovered"
+        if len(matches) > 1:
+            return None, "ambiguous"
+        return None, "missing"
+
+    def _happy_hour_windows(self, expected_date: date) -> tuple[list[dict[str, Any]], list[str]]:
+        """Return the local-day free-energy windows advertised by Octopus, if any."""
+        entity_id, resolution = self._happy_hour_source()
+        if entity_id is None:
+            # Never guess between accounts, and never fail silently either: the
+            # reason is published on the plan so a missing free window is explicable.
+            if resolution == "ambiguous":
+                return [], [
+                    "More than one Octopus power-up events entity was found, so no Happy "
+                    "Hours were planned. Select the right one in the integration options."
+                ]
+            return [], []
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            return [], []
+        sessions, warnings = parse_power_up_events(
+            state,
+            timezone=self.hass.config.time_zone,
+        )
+        return (
+            resolve_happy_hour_windows(
+                sessions,
+                expected_date=expected_date,
+                timezone=self.hass.config.time_zone,
+            ),
+            warnings,
+        )
 
     @property
     def native_value(self) -> str:
@@ -967,6 +1026,14 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
             DEFAULT_AGILE_PROTECTED_UNTIL,
         )
 
+        happy_hour_entity, happy_hour_resolution = self._happy_hour_source()
+        # A "next" plan carries today's projection into tomorrow, so it also needs
+        # today's free windows to project today's resulting SOC.
+        if self._day_kind == "next":
+            today_happy_hour_windows, _ = self._happy_hour_windows(local_now.date())
+        else:
+            today_happy_hour_windows = []
+
         # Once both days are published, carry Today's planned protection-end
         # SOC into Tomorrow instead of resetting the horizon to the reserve.
         if self._day_kind == "next" and counterpart_rates is not None:
@@ -989,21 +1056,27 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
                 max_discharge_power_w=AGILE_MAX_SYSTEM_DISCHARGE_POWER_W,
             )
             if self._tariff_preset() == COSY_OCTOPUS_TARIFF_PRESET:
-                today_plan = apply_cosy_rate_schedule(today_plan)
-            projected_soc = today_plan.get("projected_soc_at_protection_end")
+                today_plan = apply_cosy_rate_schedule(
+                    today_plan,
+                    happy_hour_windows=today_happy_hour_windows,
+                    happy_hour_entity_id=happy_hour_entity,
+                )
+            projected_soc = today_plan.get("projected_soc_at_day_end" if self._tariff_preset() == COSY_OCTOPUS_TARIFF_PRESET else "projected_soc_at_protection_end")
             if (
                 today_plan.get("status") in ("proposed", "limited")
                 and isinstance(projected_soc, int | float)
                 and math.isfinite(float(projected_soc))
             ):
                 starting_soc = max(reserve_soc, min(charge_limit_soc, float(projected_soc)))
-                starting_soc_source = "today_projected_protection_end_soc"
+                starting_soc_source = "today_projected_day_end_soc" if self._tariff_preset() == COSY_OCTOPUS_TARIFF_PRESET else "today_projected_protection_end_soc"
 
         half_hour_bucket = now_utc.replace(
             minute=(now_utc.minute // 30) * 30,
             second=0,
             microsecond=0,
         )
+        happy_hour_windows, happy_hour_warnings = self._happy_hour_windows(expected_date)
+        happy_hour_state = self.hass.states.get(happy_hour_entity) if happy_hour_entity else None
         cache_key = (
             source,
             self._tariff_preset(),
@@ -1017,6 +1090,8 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
             half_hour_bucket,
             ready_by,
             protected_until,
+            happy_hour_entity,
+            happy_hour_state.last_updated if happy_hour_state is not None else None,
         )
         if self._cached_plan_key == cache_key and self._cached_plan is not None:
             return self._cached_plan
@@ -1039,7 +1114,11 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
             max_discharge_power_w=AGILE_MAX_SYSTEM_DISCHARGE_POWER_W,
         )
         if self._tariff_preset() == COSY_OCTOPUS_TARIFF_PRESET:
-            plan = apply_cosy_rate_schedule(plan)
+            plan = apply_cosy_rate_schedule(
+                plan,
+                happy_hour_windows=happy_hour_windows,
+                happy_hour_entity_id=happy_hour_entity,
+            )
         if (
             plan.get("status") == "invalid"
             and local_now.hour == 0
@@ -1070,6 +1149,14 @@ class AeccAgileProposedPlanSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccB
         plan["tariff_code"] = state.attributes.get("tariff_code")
         plan["mpan"] = state.attributes.get("mpan")
         plan["rates_updated_at"] = state.last_updated.isoformat()
+        if self._tariff_preset() == COSY_OCTOPUS_TARIFF_PRESET:
+            plan["happy_hour_source"] = (
+                f"octopus_power_up_events_{happy_hour_resolution}"
+                if happy_hour_entity
+                else f"unavailable_{happy_hour_resolution}"
+            )
+            plan["happy_hour_entity_id"] = happy_hour_entity
+            plan["happy_hour_warnings"] = happy_hour_warnings
         self._cached_plan_key = cache_key
         self._cached_plan = plan
         return plan

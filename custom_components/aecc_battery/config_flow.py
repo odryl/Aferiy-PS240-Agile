@@ -19,6 +19,7 @@ from homeassistant.helpers import selector
 from .const import (
     CONF_ADVANCED_ENERGY_SENSORS,
     CONF_AGILE_CURRENT_DAY_RATES_ENTITY,
+    CONF_AGILE_HAPPY_HOUR_EVENTS_ENTITY,
     CONF_AGILE_NEXT_DAY_RATES_ENTITY,
     CONF_AGILE_PLANNER_ENABLED,
     CONF_AGILE_PROTECTED_UNTIL,
@@ -278,6 +279,10 @@ class AeccBatteryOptionsFlow(config_entries.OptionsFlow):
                     CONF_AGILE_NEXT_DAY_RATES_ENTITY,
                     "",
                 ),
+                CONF_AGILE_HAPPY_HOUR_EVENTS_ENTITY: user_input.get(
+                    CONF_AGILE_HAPPY_HOUR_EVENTS_ENTITY,
+                    "",
+                ),
                 CONF_AGILE_READY_BY: agile_ready_by,
                 CONF_AGILE_PROTECTED_UNTIL: agile_protected_until,
                 CONF_AVAILABLE_PV_POWER_ENTITY: user_input.get(
@@ -368,6 +373,17 @@ class AeccBatteryOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_AGILE_NEXT_DAY_RATES_ENTITY,
                     description={"suggested_value": source.get(CONF_AGILE_NEXT_DAY_RATES_ENTITY, "")},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="event")
+                ),
+                vol.Optional(
+                    CONF_AGILE_HAPPY_HOUR_EVENTS_ENTITY,
+                    description={
+                        "suggested_value": source.get(
+                            CONF_AGILE_HAPPY_HOUR_EVENTS_ENTITY,
+                            "",
+                        )
+                    },
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="event")
                 ),

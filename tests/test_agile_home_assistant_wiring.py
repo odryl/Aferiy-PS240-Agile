@@ -53,9 +53,29 @@ def test_available_pv_source_is_configurable_and_used_by_shadow_control() -> Non
 
 def test_sensor_replans_both_days_as_one_rolling_horizon_when_rates_exist() -> None:
     assert 'next_day_rates=counterpart_rates if self._day_kind == "current" else None' in SENSOR_SOURCE
-    assert 'starting_soc_source = "today_projected_protection_end_soc"' in SENSOR_SOURCE
-    assert 'today_plan.get("projected_soc_at_protection_end")' in SENSOR_SOURCE
+    # Cosy carries its day-end projection forward, so the carry-in source is
+    # tariff-dependent rather than always the Agile protection-end value.
+    assert '"today_projected_protection_end_soc"' in SENSOR_SOURCE
+    assert '"today_projected_day_end_soc" if self._tariff_preset() == COSY_OCTOPUS_TARIFF_PRESET' in SENSOR_SOURCE
+    assert '"projected_soc_at_protection_end"' in SENSOR_SOURCE
+    assert '"projected_soc_at_day_end" if self._tariff_preset() == COSY_OCTOPUS_TARIFF_PRESET' in SENSOR_SOURCE
     assert "counterpart.last_updated if counterpart_rates is not None else None" in SENSOR_SOURCE
+
+
+def test_happy_hour_entity_is_configurable_and_never_guessed() -> None:
+    assert "CONF_AGILE_HAPPY_HOUR_EVENTS_ENTITY" in CONFIG_FLOW_SOURCE
+    assert "CONF_AGILE_HAPPY_HOUR_EVENTS_ENTITY" in SENSOR_SOURCE
+    assert "OCTOPUS_POWER_UP_EVENTS_SUFFIX" in SENSOR_SOURCE
+    # Ambiguous discovery must refuse to pick an account and must say so.
+    assert 'return None, "ambiguous"' in SENSOR_SOURCE
+    assert "More than one Octopus power-up events entity" in SENSOR_SOURCE
+    assert 'plan["happy_hour_source"]' in SENSOR_SOURCE
+    assert 'plan["happy_hour_warnings"]' in SENSOR_SOURCE
+    # A Happy Hour must reach the plan only through the Cosy overlay.
+    assert "happy_hour_windows=happy_hour_windows" in SENSOR_SOURCE
+    assert "parse_power_up_events(" in SENSOR_SOURCE
+    assert "resolve_happy_hour_windows(" in SENSOR_SOURCE
+    assert "happy_hour_windows" in CARD_SOURCE.lower() or "free_energy" in CARD_SOURCE
 
 
 def test_agile_path_remains_shadow_only() -> None:

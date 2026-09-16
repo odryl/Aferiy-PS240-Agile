@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.8.31
+
+- Plan Octopus **Weekend Happy Hours** inside the Cosy Octopus schedule. Booked
+  free-power windows are treated as zero-cost grid charging, so the battery
+  charges towards the configured target even when the window falls in a peak or
+  standard band.
+- Read the booked windows from BottlecapDave's Octopus power-up session events
+  entity, with automatic discovery when exactly one exists and a new optional
+  **Octopus Weekend Happy Hours power-up event** setting to choose it explicitly.
+- Publish `happy_hour_windows`, `scheduled_free_energy_periods`,
+  `happy_hour_grid_charge_kwh`, and `estimated_happy_hour_credit_gbp` on the
+  Proposed Plan, and show the free window as credited-back import on the Cosy
+  card instead of a billed cost.
+- Keep free import out of the billed charge cost and the replacement rate, so
+  Happy Hour energy never inflates the estimated net saving or average charge
+  price.
+- Report skipped Octopus sessions and ambiguous multi-account discovery through
+  `happy_hour_warnings` and `happy_hour_source` instead of failing silently, and
+  show the Happy Hour credit and any warnings in the card's plan details.
+- Restructure the README as a concise project landing page led by the Cosy and
+  Agile planners, with the deep device, tariff, and operational detail moved to
+  `docs/COSY_PLANNER.md`, `docs/AGILE_PLANNER.md`, and
+  `docs/ADVANCED_CONFIGURATION.md`.
+- Add a dashboard screenshot to the README and the card guides, showing the
+  Cosy plan card next to live battery telemetry and the Wi-Fi loss recovery
+  card.
+
 ## 1.8.30
 
 - Redesign the Cosy Octopus Battery Plan around the current action, live battery SOC, next charge target, and next tariff period.

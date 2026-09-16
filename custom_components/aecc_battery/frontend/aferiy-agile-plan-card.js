@@ -192,6 +192,9 @@ class AferiyAgilePlanCard extends HTMLElement {
 
   _slotValue(slot) {
     if (slot.action === "charge") {
+      if (slot.tariff_phase === "free_energy") {
+        return `<span class="free-energy">Free import<br><strong>${this._money(slot.credited_back_gbp)} credited back</strong></span>`;
+      }
       if (slot.tariff_phase === "cheap_charge") {
         const shortfall = Number(slot.cover_shortfall_kwh);
         return `<span class="cost">Cover ${this._number(slot.required_cover_kwh, " kWh", 2)} to ${this._escape(slot.cover_until || "next cheap period")}${Number.isFinite(shortfall) && shortfall > 0 ? `<br><strong>Capacity shortfall ${this._number(shortfall, " kWh", 2)}</strong>` : ""}</span>`;
@@ -210,6 +213,10 @@ class AferiyAgilePlanCard extends HTMLElement {
   }
 
   _actionLabel(action, slot = {}) {
+    if (slot.tariff_phase === "free_energy") {
+      const target = Number(slot.slot_target_soc);
+      return Number.isFinite(target) ? `Free-power charge to ${target.toFixed(0)}%` : "Free-power charge";
+    }
     if (slot.tariff_phase === "cheap_charge") {
       const target = Number(slot.slot_target_soc);
       return Number.isFinite(target) ? `Charge / Idle to ${target.toFixed(0)}%` : "Charge / Idle";
@@ -255,13 +262,15 @@ class AferiyAgilePlanCard extends HTMLElement {
         const current = this._isCurrent(period, now);
         const target = Number(period.slot_target_soc);
         const shortfall = Number(period.cover_shortfall_kwh);
-        const purpose = period.action === "charge"
+        const purpose = period.tariff_phase === "free_energy"
+          ? `Octopus Weekend Happy Hour · import credited back, so charge to ${Number.isFinite(target) ? `${target.toFixed(0)}%` : "target"} regardless of tariff band`
+          : period.action === "charge"
           ? `PV-first charge / Idle to ${Number.isFinite(target) ? `${target.toFixed(0)}%` : "target"} · cover to ${this._escape(period.cover_until || "next cheap period")}${Number.isFinite(shortfall) && shortfall > 0 ? ` · <strong>${this._number(shortfall, " kWh", 2)} capacity shortfall</strong>` : ""}`
           : period.cosy_rate_band === "peak"
             ? "Peak protection · CT-controlled household supply"
             : "Self-consumption · CT-controlled zero export";
-        return `<div class="cosy-period ${this._escape(period.action)} ${current ? "current" : ""}">
-          <div class="period-time"><strong>${current ? "Now · " : ""}${this._escape(period.local_start)}–${this._escape(period.local_end)}</strong><span>${this._escape(period.cosy_rate_band || "standard")} rate</span></div>
+        return `<div class="cosy-period ${this._escape(period.action)} ${period.tariff_phase === "free_energy" ? "free" : ""} ${current ? "current" : ""}">
+          <div class="period-time"><strong>${current ? "Now · " : ""}${this._escape(period.local_start)}–${this._escape(period.local_end)}</strong><span>${period.tariff_phase === "free_energy" ? "free power" : `${this._escape(period.cosy_rate_band || "standard")} rate`}</span></div>
           <div class="period-plan"><strong>${this._escape(this._actionLabel(period.action, period))}</strong><span>${purpose}</span></div>
           <div class="period-price"><strong>${this._cosyPeriodPrice(period)}</strong><span>${this._number(period.duration_minutes, " min", 0)}</span></div>
         </div>`;
@@ -359,29 +368,37 @@ class AferiyAgilePlanCard extends HTMLElement {
     return periods.map((period) => {
       const current = today && this._isCurrent(period, Date.now());
       const charge = period.action === "charge";
+      const free = period.tariff_phase === "free_energy";
       const target = this._number(this._cosyNumber(period.slot_target_soc), "%", 0);
       const band = ["cheap", "peak", "standard"].includes(period.cosy_rate_band) ? period.cosy_rate_band : "standard";
-      return `<div class="co-row${current ? " co-current" : ""}">
+      return `<div class="co-row${current ? " co-current" : ""}${free ? " co-row-free" : ""}">
         <div class="co-time">${this._escape(period.local_start)}–${this._escape(period.local_end)}${current ? '<span class="co-now">● Now</span>' : ""}</div>
-        <div><div class="co-action">${charge ? `Charge to ${target}` : "Supply home"}</div>
-          <div class="co-muted co-small">${charge ? `Then hold · cover to ${this._escape(period.cover_until || "next cheap period")}` : band === "peak" ? "Peak protection · zero export" : "Self-Gen · zero export"}</div>
+        <div><div class="co-action">${free ? `Free power · charge to ${target}` : charge ? `Charge to ${target}` : "Supply home"}</div>
+          <div class="co-muted co-small">${free ? "Octopus Weekend Happy Hour · import credited back" : charge ? `Then hold · cover to ${this._escape(period.cover_until || "next cheap period")}` : band === "peak" ? "Peak protection · zero export" : "Self-Gen · zero export"}</div>
           ${Number(period.cover_shortfall_kwh) > 0 ? `<div class="co-warning co-small">Capacity shortfall ${this._number(period.cover_shortfall_kwh, " kWh", 2)}</div>` : ""}</div>
-        <div class="co-rate">${this._cosyPeriodPrice(period).replace("/kWh", "")}<span class="co-muted co-small"><i class="co-dot ${band}"></i>${band} · /kWh</span></div>
+        <div class="co-rate">${this._cosyPeriodPrice(period).replace("/kWh", "")}<span class="co-muted co-small"><i class="co-dot ${free ? "cheap" : band}"></i>${free ? "free power" : `${band} · /kWh`}</span></div>
       </div>`;
     }).join("");
   }
 
   _cosyDetails(attrs, availablePv) {
+    const freeKwh = this._cosyNumber(attrs.happy_hour_grid_charge_kwh);
+    const freeCredit = this._cosyNumber(attrs.estimated_happy_hour_credit_gbp);
+    const happyHourFields = Number(freeKwh) > 0 ? [
+      ["Happy Hour grid charge", this._number(freeKwh, " kWh", 2)],
+      ["Happy Hour credit", `${this._money(freeCredit)} at the local unit rate, capped at 16 kWh per hour by Octopus`],
+    ] : [];
     const fields = [
       ["Plan starting SOC", this._number(this._cosyNumber(attrs.starting_soc), "%", 0)],
       ["Projected ready-by SOC", this._number(this._cosyNumber(attrs.projected_soc_at_ready_by), "%", 0)],
       ["SOC after protection", this._number(this._cosyNumber(attrs.projected_soc_at_protection_end), "%", 0)],
       ["Estimated charging cost", this._money(this._cosyNumber(attrs.estimated_grid_charge_cost_gbp))],
+      ...happyHourFields,
       ["Avoided import value", this._money(this._cosyNumber(attrs.estimated_avoided_import_cost_gbp))],
       ["Discharged-energy replacement", this._money(this._cosyNumber(attrs.estimated_discharge_replacement_cost_gbp))],
       ["Average charge rate", `${this._rate(this._cosyNumber(attrs.average_planned_charge_rate_gbp_per_kwh))}/kWh`],
       ["Delivered replacement rate", `${this._rate(this._cosyNumber(attrs.delivered_replacement_cost_gbp_per_kwh))}/kWh`],
-      ["Replacement prices", attrs.replacement_rate_source === "next_day_published_rates" ? "Published tomorrow" : "Same day"],
+      ["Replacement prices", attrs.replacement_rate_source === "cosy_remaining_cheap_average" ? "Mean remaining Cosy cheap rate" : attrs.replacement_rate_source === "next_day_published_rates" ? "Published tomorrow" : "Same day"],
       [`Planned discharge to ${attrs.protected_until || "22:00"}`, this._number(this._cosyNumber(attrs.planned_discharge_kwh), " kWh", 2)],
       ["Battery capacity", this._number(this._cosyNumber(attrs.battery_capacity_kwh), " kWh", 3)],
       ["Reserve / charge limit", `${this._number(this._cosyNumber(attrs.reserve_soc), "%", 0)} / ${this._number(this._cosyNumber(attrs.charge_limit_soc ?? attrs.target_soc), "%", 0)}`],
@@ -391,7 +408,8 @@ class AferiyAgilePlanCard extends HTMLElement {
     ];
     return `<dl>${fields.map(([label, value]) => `<dt>${this._escape(label)}</dt><dd>${this._escape(value)}</dd>`).join("")}</dl>
       <p>${this._escape(attrs.schedule_note || "Targets are calculated separately for each cheap period.")}</p>
-      ${attrs.starting_soc_source === "conservative_reserve_assumption" ? "<p>Tomorrow assumes the battery starts at reserve; this will refine when it becomes Today.</p>" : attrs.starting_soc_source === "today_projected_protection_end_soc" ? "<p>Tomorrow starts from today's projected ending SOC.</p>" : ""}
+      ${attrs.starting_soc_source === "conservative_reserve_assumption" ? "<p>Tomorrow assumes the battery starts at reserve; this will refine when it becomes Today.</p>" : ["today_projected_protection_end_soc", "today_projected_day_end_soc"].includes(attrs.starting_soc_source) ? "<p>Tomorrow starts from today's projected ending SOC.</p>" : ""}
+      ${(attrs.happy_hour_warnings || []).length ? `<p>${this._escape((attrs.happy_hour_warnings || []).join(" "))}</p>` : ""}
       ${attrs.economic_plan_reason ? `<p>${this._escape(attrs.economic_plan_reason)}</p>` : ""}
       <p>${this._escape(attrs.cost_estimate_note || "Estimates cover planned battery actions, not your total electricity bill.")}</p>`;
   }
@@ -424,7 +442,7 @@ class AferiyAgilePlanCard extends HTMLElement {
     const auto = control?.state === "on";
     const controllerStatus = control?.attributes?.status || "Waiting";
     const active = auto && controllerStatus === "Active";
-    const blocked = auto && !active;
+    const blocked = (auto && !active) || ["Inhibited", "Restore pending", "Fail-safe"].includes(controllerStatus);
     const mode = active ? control.attributes.active_mode : decision.recommended_operating_mode;
     const labels = { "Charge": "Charging", "Idle": "Holding battery", "Self-Gen/Zero Export": "Supplying home" };
     let headline = labels[mode] || "Waiting for a decision";
@@ -463,11 +481,12 @@ class AferiyAgilePlanCard extends HTMLElement {
         <div class="co-battery-foot co-muted co-small"><span>${this._number(reserve, "%", 0)} reserve</span><span>${next ? `Next: ${next.action === "charge" ? "charge" : "supply home"} · ${this._escape(next.local_start)}–${this._escape(next.local_end)}` : 'Next period unavailable'}</span></div></section>
       <section class="co-plan"><div class="co-plan-head"><div class="co-tabs" role="tablist" aria-label="Plan day"><button role="tab" id="co-today" data-day="today" data-focus="today" aria-selected="${isToday}" aria-controls="co-day">Today</button><button role="tab" id="co-tomorrow" data-day="tomorrow" data-focus="tomorrow" aria-selected="${!isToday}" aria-controls="co-day">Tomorrow</button></div><span class="co-muted co-small">${this._escape(attrs.date || (isToday ? "Today" : "Tomorrow"))}</span></div>
         <div id="co-day" role="tabpanel" aria-labelledby="co-${isToday ? "today" : "tomorrow"}">
+          ${Number(attrs.charge_target_shortfall_kwh) > 0 ? alert(`Charging time shortfall · ${this._number(attrs.charge_target_shortfall_kwh, " kWh", 2)} of stored energy cannot be added before the charge deadlines.`) : ""}
           ${attrs.starting_below_reserve ? alert("Battery SOC starts below reserve. Charging back to reserve takes priority.") : ""}
           ${shortfalls.length ? alert("Capacity shortfall · Some demand cannot be covered within your battery limits. Grid import may be needed; amounts are shown below.") : ""}
           ${earlier.length ? `<details data-timeline="cosy-earlier"><summary data-focus="earlier">Earlier today · ${earlier.length} periods</summary>${this._cosyRows(earlier, true)}</details>` : ""}
           ${remaining.length ? this._cosyRows(remaining, isToday) : `<p class="co-empty">${this._escape(attrs.reason || "Waiting for validated Cosy operating periods.")}</p>`}
-          <div class="co-metrics"><div><span class="co-muted co-small">Estimated net saving</span><strong>${this._money(validDay ? this._cosyNumber(attrs.estimated_net_saving_gbp) : NaN)}</strong></div><div><span class="co-muted co-small">Planned grid charge</span><strong>${this._number(validDay ? this._cosyNumber(attrs.planned_grid_charge_kwh) : NaN, " kWh", 2)}</strong></div></div>
+          <div class="co-metrics"><div><span class="co-muted co-small">Estimated net value${attrs.estimate_scope === "remaining_day" ? " · remaining" : ""}</span><strong>${this._money(validDay ? this._cosyNumber(attrs.estimated_net_saving_gbp) : NaN)}</strong></div><div><span class="co-muted co-small">Planned grid charge</span><strong>${this._number(validDay ? this._cosyNumber(attrs.planned_grid_charge_kwh) : NaN, " kWh", 2)}</strong></div></div>
           ${validDay ? `<details data-timeline="cosy-details-${isToday ? "today" : "tomorrow"}"><summary data-focus="details">Cost breakdown &amp; plan details</summary><div class="co-detail">${this._cosyDetails(attrs, availablePv)}</div></details>` : ""}
         </div></section>
       <footer class="co-footer co-muted co-small"><span>${fresh ? `Battery updated ${this._cosyTime(decision.connection_last_successful_update)}` : "Battery update unavailable"} · ${validDay ? "Rates validated" : "Rates unavailable"}</span></footer>
@@ -600,7 +619,11 @@ class AferiyAgilePlanCard extends HTMLElement {
         .saving { color: var(--success-color, #43a047); font-weight: 700; } .empty { color: var(--secondary-text-color); padding: 8px 0; }
         .cosy-periods { display: grid; gap: 7px; }
         .cosy-period { display: grid; grid-template-columns: minmax(120px, .8fr) minmax(250px, 2fr) minmax(105px, .8fr); gap: 12px; align-items: center; padding: 10px; border-radius: 9px; background: var(--secondary-background-color); border-left: 4px solid #f57c00; }
-        .cosy-period.charge { border-left-color: #2196f3; } .cosy-period.current { outline: 2px solid var(--primary-color); outline-offset: 1px; }
+        .cosy-period.charge { border-left-color: #2196f3; }
+        .cosy-period.free { border-left-color: #168366; background: rgba(22, 131, 102, .10); }
+        .co-row-free { background: rgba(22, 131, 102, .10); box-shadow: inset 3px 0 0 #168366; }
+        .free-energy { color: #168366; font-weight: 700; }
+        tr.charge .free-energy, tr.charge .cost.free-energy { color: #168366; } .cosy-period.current { outline: 2px solid var(--primary-color); outline-offset: 1px; }
         .cosy-period span { display: block; margin-top: 3px; color: var(--secondary-text-color); font-size: 11px; }
         .period-price { text-align: right; }
         details { margin-top: 14px; } summary { cursor: pointer; font-weight: 600; }

@@ -150,3 +150,35 @@ cancels the pending change. Entity attributes expose status, reason,
 current/requested channel, grace deadline, poll count, last result, and cooldown
 timing, but never the router address, administrator password, SSID, or Wi-Fi
 passphrase.
+
+## Tariff Plan Sensors
+
+The **Agile Proposed Plan Today** and **Agile Proposed Plan Tomorrow** sensors
+carry either tariff's plan as state attributes, and are named for Agile for
+backward compatibility even when Cosy is selected. The most useful attributes:
+
+| Attribute | Meaning |
+| --- | --- |
+| `status` | `proposed`, `limited`, `waiting_for_rates`, or `invalid` |
+| `reason` | Why the plan is not `proposed`, or what it assumed |
+| `tariff_strategy` | `cosy_fixed_daily_schedule` for Cosy; Agile plans omit it |
+| `slots` | The full half-hour plan, internal to the tariff validation |
+| `cosy_periods` | Cosy's seven consolidated tariff/operating periods |
+| `scheduled_charge_periods` | Cheap-period half-hours armed to charge |
+| `scheduled_free_energy_periods` | Half-hours inside a booked Weekend Happy Hour |
+| `happy_hour_windows` | The booked free windows, clipped to this plan's day |
+| `happy_hour_entity_id` | The Octopus power-up events entity that supplied them |
+| `happy_hour_source` | `octopus_power_up_events_configured`, `_discovered`, or `unavailable_missing`/`unavailable_ambiguous` |
+| `happy_hour_warnings` | Anything skipped, e.g. sessions whose codes name another type |
+| `happy_hour_grid_charge_kwh` | Grid energy imported inside a free window |
+| `estimated_happy_hour_credit_gbp` | Credited-back estimate at the local unit rate |
+| `next_day_rates_used` | Agile rolling horizon is active |
+| `replacement_rate_source` | Which prices value discharged energy |
+| `projected_soc_at_protection_end` | Agile projected SOC at the end of protection |
+| `projected_soc_at_day_end` | Cosy projected SOC at midnight |
+| `starting_soc_source` | Where the plan's starting SOC came from |
+| `charge_target_shortfall_kwh` | Energy the battery cannot add before its deadlines |
+
+`happy_hour_warnings` is deliberately surfaced rather than logged: identifying a
+Happy Hour from an undocumented event code is a guess, so anything the parser
+rejects is reported instead of disappearing.

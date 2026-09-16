@@ -62,7 +62,8 @@
           "agile_protected_until": "Protect household demand until",
           "available_pv_power_entity": "Available PV power entity",
           "dependency_solcast_confirmed": "1. Solcast installed",
-          "dependency_home_occupancy_confirmed": "2. Home Occupancy enabled"
+          "dependency_home_occupancy_confirmed": "2. Home Occupancy enabled",
+          "agile_happy_hour_events_entity": "Octopus Weekend Happy Hours power-up event"
         },
         "data_description": {
           "advanced_energy_sensors": "Adds optional estimate sensors that can use solar forecast, tariff, occupancy, and household demand data. Leave disabled for the clean core battery integration.",
@@ -78,7 +79,8 @@
           "available_pv_power_entity": "Optional live inverter power or solar 'power now' estimate that remains available when the battery curtails PV at its Charge Limit. Must report power in W or kW.",
           "master_device": "Choose the master/coordinator, or leave as manual and enter the IP below. Executor units should not be selected.",
           "dependency_solcast_confirmed": "Tick once Solcast PV Forecast is installed. Used for timed solar forecasts and solar-aware estimates.",
-          "dependency_home_occupancy_confirmed": "Tick once home occupancy is enabled. Uses Home Assistant's zone.home occupancy count so empty-house periods do not train the normal demand profile."
+          "dependency_home_occupancy_confirmed": "Tick once home occupancy is enabled. Uses Home Assistant's zone.home occupancy count so empty-house periods do not train the normal demand profile.",
+          "agile_happy_hour_events_entity": "Optional BottlecapDave Octopus Energy power-up session events entity. Enable it in Home Assistant first (it ships disabled), then plan Cosy Weekend Happy Hours as free energy windows. Leave empty for automatic discovery when exactly one exists."
         }
       }
     },
