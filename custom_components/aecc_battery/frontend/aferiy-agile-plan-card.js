@@ -1,4 +1,20 @@
 class AferiyAgilePlanCard extends HTMLElement {
+  constructor() {
+    super();
+    this._root = this.attachShadow({ mode: "open" });
+  }
+
+  connectedCallback() {
+    this._timer = window.setInterval(() => {
+      if (this._hass && this.config) this._renderIfNeeded();
+    }, 30000);
+    if (this._hass && this.config) this._renderIfNeeded(true);
+  }
+
+  disconnectedCallback() {
+    window.clearInterval(this._timer);
+  }
+
   setConfig(config) {
     const nextConfig = config || {};
     const nextSignature = JSON.stringify(nextConfig);
@@ -21,29 +37,44 @@ class AferiyAgilePlanCard extends HTMLElement {
     return 12;
   }
 
-  _find(configured, entitySuffix, friendlyName) {
-    if (configured && this._hass.states[configured]) return this._hass.states[configured];
-    return Object.values(this._hass.states).find(
-      (state) => state.entity_id.startsWith("sensor.") && (
+  _findEntity(configured, domain, entitySuffix, friendlyName) {
+    if (configured) return this._hass.states[configured];
+    let candidates = Object.values(this._hass.states).filter(
+      state => state.entity_id.startsWith(`${domain}.`) && (
         state.entity_id.endsWith(entitySuffix)
         || state.attributes?.friendly_name?.endsWith(friendlyName)
       ),
     );
+    if (this._entityReference) {
+      const deviceId = this._hass.entities?.[this._entityReference.entity_id]?.device_id;
+      if (deviceId) {
+        candidates = candidates.filter(state => this._hass.entities?.[state.entity_id]?.device_id === deviceId);
+      } else {
+        const prefix = this._entityReference.entity_id.replace(/^sensor\./, "")
+          .replace(/_agile_proposed_plan_(today|tomorrow)$/, "");
+        const sameDevice = candidates.filter(state => state.entity_id.split(".")[1].startsWith(`${prefix}_`));
+        // Without registry data, ambiguous matches must be configured explicitly.
+        if (sameDevice.length || /_agile_proposed_plan_(today|tomorrow)$/.test(this._entityReference.entity_id)) candidates = sameDevice;
+      }
+    }
+    return candidates.length === 1 ? candidates[0] : undefined;
+  }
+
+  _find(configured, entitySuffix, friendlyName) {
+    return this._findEntity(configured, "sensor", entitySuffix, friendlyName);
   }
 
   _findSwitch(configured, entitySuffix, friendlyName) {
-    if (configured && this._hass.states[configured]) return this._hass.states[configured];
-    return Object.values(this._hass.states).find(
-      (state) => state.entity_id.startsWith("switch.") && (
-        state.entity_id.endsWith(entitySuffix)
-        || state.attributes?.friendly_name?.endsWith(friendlyName)
-      ),
-    );
+    return this._findEntity(configured, "switch", entitySuffix, friendlyName);
   }
 
   _renderIfNeeded(force = false) {
+    if (!this.config || !this._hass) return;
+    this._entityReference = null;
     const today = this._find(this.config.today_entity, "_agile_proposed_plan_today", "Agile Proposed Plan Today");
+    this._entityReference = today;
     const tomorrow = this._find(this.config.tomorrow_entity, "_agile_proposed_plan_tomorrow", "Agile Proposed Plan Tomorrow");
+    this._entityReference = today || tomorrow;
     const shadow = this._find(this.config.shadow_entity, "_agile_shadow_operating_state", "Agile Shadow Operating State");
     const availablePv = this._find(this.config.available_pv_entity, "_available_pv_power", "Available PV Power");
     const isCosy = (today?.attributes?.tariff_name || tomorrow?.attributes?.tariff_name) === "Cosy Octopus";
@@ -62,6 +93,8 @@ class AferiyAgilePlanCard extends HTMLElement {
       tomorrow?.attributes,
       shadow?.entity_id,
       shadow?.state,
+      shadow?.attributes,
+      isCosy ? Math.floor(Date.now() / 30000) : null,
       shadow?.attributes?.recommended_operating_mode,
       shadow?.attributes?.reason,
       shadow?.attributes?.planned_slot_start,
@@ -117,17 +150,17 @@ class AferiyAgilePlanCard extends HTMLElement {
   }
 
   _money(value, fallback = "—") {
-    const number = Number(value);
+    const number = value == null || value === "" ? NaN : Number(value);
     return Number.isFinite(number) ? `£${number.toFixed(2)}` : fallback;
   }
 
   _rate(value) {
-    const number = Number(value);
+    const number = value == null || value === "" ? NaN : Number(value);
     return Number.isFinite(number) ? `${(number * 100).toFixed(1)}p` : "—";
   }
 
   _number(value, suffix = "", digits = 1) {
-    const number = Number(value);
+    const number = value == null || value === "" ? NaN : Number(value);
     return Number.isFinite(number) ? `${number.toFixed(digits)}${suffix}` : "—";
   }
 
@@ -206,8 +239,8 @@ class AferiyAgilePlanCard extends HTMLElement {
   }
 
   _cosyPeriodPrice(period) {
-    const minimum = Number(period.minimum_rate_gbp_per_kwh);
-    const maximum = Number(period.maximum_rate_gbp_per_kwh);
+    const minimum = this._cosyNumber(period.minimum_rate_gbp_per_kwh);
+    const maximum = this._cosyNumber(period.maximum_rate_gbp_per_kwh);
     if (Number.isFinite(minimum) && Number.isFinite(maximum) && Math.abs(maximum - minimum) > 0.000001) {
       return `${this._rate(minimum)}–${this._rate(maximum)}/kWh`;
     }
@@ -304,10 +337,230 @@ class AferiyAgilePlanCard extends HTMLElement {
     </section>`;
   }
 
+  _cosyNumber(value) {
+    return value === null || value === undefined || value === "" ? NaN : Number(value);
+  }
+
+  _cosyTime(value) {
+    const date = new Date(value);
+    if (!value || !Number.isFinite(date.getTime())) return "—";
+    return new Intl.DateTimeFormat(this._hass.locale?.language || "en-GB", {
+      hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+      timeZone: this._hass.config?.time_zone || "Europe/London",
+    }).format(date);
+  }
+
+  _cosyValid(state) {
+    return state && !["unavailable", "unknown"].includes(state.state)
+      && ["proposed", "limited"].includes(state.attributes?.status);
+  }
+
+  _cosyRows(periods, today) {
+    return periods.map((period) => {
+      const current = today && this._isCurrent(period, Date.now());
+      const charge = period.action === "charge";
+      const target = this._number(this._cosyNumber(period.slot_target_soc), "%", 0);
+      const band = ["cheap", "peak", "standard"].includes(period.cosy_rate_band) ? period.cosy_rate_band : "standard";
+      return `<div class="co-row${current ? " co-current" : ""}">
+        <div class="co-time">${this._escape(period.local_start)}–${this._escape(period.local_end)}${current ? '<span class="co-now">● Now</span>' : ""}</div>
+        <div><div class="co-action">${charge ? `Charge to ${target}` : "Supply home"}</div>
+          <div class="co-muted co-small">${charge ? `Then hold · cover to ${this._escape(period.cover_until || "next cheap period")}` : band === "peak" ? "Peak protection · zero export" : "Self-Gen · zero export"}</div>
+          ${Number(period.cover_shortfall_kwh) > 0 ? `<div class="co-warning co-small">Capacity shortfall ${this._number(period.cover_shortfall_kwh, " kWh", 2)}</div>` : ""}</div>
+        <div class="co-rate">${this._cosyPeriodPrice(period).replace("/kWh", "")}<span class="co-muted co-small"><i class="co-dot ${band}"></i>${band} · /kWh</span></div>
+      </div>`;
+    }).join("");
+  }
+
+  _cosyDetails(attrs, availablePv) {
+    const fields = [
+      ["Plan starting SOC", this._number(this._cosyNumber(attrs.starting_soc), "%", 0)],
+      ["Projected ready-by SOC", this._number(this._cosyNumber(attrs.projected_soc_at_ready_by), "%", 0)],
+      ["SOC after protection", this._number(this._cosyNumber(attrs.projected_soc_at_protection_end), "%", 0)],
+      ["Estimated charging cost", this._money(this._cosyNumber(attrs.estimated_grid_charge_cost_gbp))],
+      ["Avoided import value", this._money(this._cosyNumber(attrs.estimated_avoided_import_cost_gbp))],
+      ["Discharged-energy replacement", this._money(this._cosyNumber(attrs.estimated_discharge_replacement_cost_gbp))],
+      ["Average charge rate", `${this._rate(this._cosyNumber(attrs.average_planned_charge_rate_gbp_per_kwh))}/kWh`],
+      ["Delivered replacement rate", `${this._rate(this._cosyNumber(attrs.delivered_replacement_cost_gbp_per_kwh))}/kWh`],
+      ["Replacement prices", attrs.replacement_rate_source === "next_day_published_rates" ? "Published tomorrow" : "Same day"],
+      [`Planned discharge to ${attrs.protected_until || "22:00"}`, this._number(this._cosyNumber(attrs.planned_discharge_kwh), " kWh", 2)],
+      ["Battery capacity", this._number(this._cosyNumber(attrs.battery_capacity_kwh), " kWh", 3)],
+      ["Reserve / charge limit", `${this._number(this._cosyNumber(attrs.reserve_soc), "%", 0)} / ${this._number(this._cosyNumber(attrs.charge_limit_soc ?? attrs.target_soc), "%", 0)}`],
+      ["AC charge / home supply limit", `${this._number(this._cosyNumber(attrs.max_system_charge_power_w), " W", 0)} / ${this._number(this._cosyNumber(attrs.cosy_max_battery_output_w ?? attrs.max_system_discharge_power_w), " W", 0)}`],
+      ["Available PV power", this._number(this._cosyNumber(availablePv?.state), " W", 0)],
+      ["PV source", availablePv?.attributes?.source === "configured_available_pv_estimate" ? "Configured uncurtailed estimate" : availablePv ? "Measured live PV" : "Unavailable"],
+    ];
+    return `<dl>${fields.map(([label, value]) => `<dt>${this._escape(label)}</dt><dd>${this._escape(value)}</dd>`).join("")}</dl>
+      <p>${this._escape(attrs.schedule_note || "Targets are calculated separately for each cheap period.")}</p>
+      ${attrs.starting_soc_source === "conservative_reserve_assumption" ? "<p>Tomorrow assumes the battery starts at reserve; this will refine when it becomes Today.</p>" : attrs.starting_soc_source === "today_projected_protection_end_soc" ? "<p>Tomorrow starts from today's projected ending SOC.</p>" : ""}
+      ${attrs.economic_plan_reason ? `<p>${this._escape(attrs.economic_plan_reason)}</p>` : ""}
+      <p>${this._escape(attrs.cost_estimate_note || "Estimates cover planned battery actions, not your total electricity bill.")}</p>`;
+  }
+
+  _renderCosy(today, tomorrow, shadow, control, daylightFlex, availablePv) {
+    const now = Date.now();
+    const isToday = this._selectedDay !== "tomorrow";
+    const selected = isToday ? today : tomorrow;
+    const attrs = selected?.attributes || {};
+    const live = today?.attributes || {};
+    const decision = shadow?.attributes || {};
+    const validToday = this._cosyValid(today);
+    const validDay = this._cosyValid(selected);
+    const periods = validDay && Array.isArray(attrs.cosy_periods) ? attrs.cosy_periods : [];
+    const livePeriods = validToday && Array.isArray(live.cosy_periods) ? live.cosy_periods : [];
+    const current = livePeriods.find(period => this._isCurrent(period, now));
+    const tomorrowPeriods = this._cosyValid(tomorrow) && Array.isArray(tomorrow.attributes.cosy_periods) ? tomorrow.attributes.cosy_periods : [];
+    const upcoming = [...livePeriods, ...tomorrowPeriods].filter(period => Date.parse(period.end) > now);
+    const targetPeriod = upcoming.find(period => period.action === "charge");
+    const next = upcoming.find(period => Date.parse(period.start) > now);
+    const lastTelemetry = Date.parse(decision.connection_last_successful_update);
+    const staleAfter = this._cosyNumber(decision.connection_stale_after_seconds);
+    const fresh = shadow && !["unavailable", "unknown", "Connection Fail-safe"].includes(shadow.state)
+      && Number.isFinite(lastTelemetry) && Number.isFinite(staleAfter) && now - lastTelemetry <= staleAfter * 1000;
+    const soc = fresh ? this._cosyNumber(decision.soc_percent) : NaN;
+    const reserve = this._cosyNumber(decision.reserve_soc ?? live.reserve_soc);
+    // Daylight Flex can raise the current cheap-window target to the live charge limit.
+    const target = this._cosyNumber(current?.action === "charge" && fresh
+      ? decision.target_soc ?? targetPeriod?.slot_target_soc : targetPeriod?.slot_target_soc);
+    const auto = control?.state === "on";
+    const controllerStatus = control?.attributes?.status || "Waiting";
+    const active = auto && controllerStatus === "Active";
+    const blocked = auto && !active;
+    const mode = active ? control.attributes.active_mode : decision.recommended_operating_mode;
+    const labels = { "Charge": "Charging", "Idle": "Holding battery", "Self-Gen/Zero Export": "Supplying home" };
+    let headline = labels[mode] || "Waiting for a decision";
+    if (mode === "Charge" && Number.isFinite(target)) headline = `Charging to ${target.toFixed(0)}%`;
+    if (shadow?.state === "Cosy Solar Wait" && mode === "Idle") headline = "Waiting for solar";
+    if (shadow?.state === "Solar Charge Deferred" && mode === "Self-Gen/Zero Export") headline = "Making use of solar";
+    if (!validToday || !current) headline = "Waiting for valid rates";
+    if (!fresh) headline = "Battery data unavailable";
+    if (blocked) headline = `Control ${controllerStatus.toLowerCase()}`;
+    const reason = blocked ? control.attributes.reason : !fresh ? "Waiting for fresh battery telemetry."
+      : !validToday || !current ? live.reason || "A validated current-day plan is unavailable."
+      : active ? control.attributes.reason || decision.reason : decision.reason;
+    const latestStart = Date.parse(decision.latest_grid_charge_start);
+    const margin = Number.isFinite(latestStart) ? Math.max(0, Math.ceil((latestStart - now) / 60000)) : NaN;
+    const solarWait = fresh && current && validToday && !blocked && shadow?.state === "Cosy Solar Wait";
+    const earlier = isToday ? periods.filter(period => Date.parse(period.end) <= now) : [];
+    const remaining = isToday ? periods.filter(period => Date.parse(period.end) > now) : periods;
+    const shortfalls = remaining.filter(period => Number(period.cover_shortfall_kwh) > 0);
+    const title = this.config.title || "Cosy Octopus";
+    const focusKey = this._root.activeElement?.dataset.focus;
+    const alert = message => `<p class="co-alert" role="status">${this._escape(message)}</p>`;
+    this._root.innerHTML = `<ha-card class="co-card">
+      <style>${this._cosyStyles()}</style>
+      <header class="co-header"><div class="co-title"><ha-icon icon="mdi:battery-charging-outline"></ha-icon><div><h2>${this._escape(title)}</h2><div class="co-muted co-small">Battery plan · AFERIY</div></div></div>
+        <span class="co-badge ${active ? "co-success" : "co-muted"}">${auto ? `● Auto · ${this._escape(controllerStatus)}` : control?.state === "off" ? "○ Plan only" : "Control unavailable"}</span></header>
+      <section class="co-hero" aria-live="polite"><div class="co-kicker">${active ? "NOW" : auto ? "CONTROLLER" : "PROPOSED · CONTROL OFF"}${current ? ` · ${this._escape(current.cosy_rate_band)} RATE` : ""}</div>
+        <h3>${this._escape(headline)}</h3><div class="co-muted co-reason">${this._escape(reason || "Waiting for a controller decision.")}</div>
+        ${!auto ? '<p class="co-small">Automatic control is off. This plan is advisory.</p>' : ""}
+        <div class="co-hero-foot"><span>${solarWait && Number.isFinite(margin) ? `Grid charge in <strong>${margin} min</strong>, if needed` : `Mode: ${this._escape(mode || "Unavailable")}`}</span><span>${current ? `${this._cosyPeriodPrice(current)} until ${this._escape(current.local_end)}` : "Rate unavailable"}</span></div></section>
+      ${!fresh ? alert("Live battery data is unavailable or stale. Charge progress cannot be confirmed.") : ""}
+      <section class="co-battery"><div class="co-battery-head"><div class="co-soc">${this._number(soc, "%", 0)} <span class="co-muted co-small">Battery now</span></div><div class="co-target">${Number.isFinite(target) && targetPeriod ? `<strong>${this._number(target, "%", 0)}</strong> target by ${this._escape(targetPeriod.local_end)}${Date.parse(targetPeriod.start) >= Date.parse(tomorrowPeriods[0]?.start) ? ' tomorrow' : ''}` : 'Target unavailable'}</div></div>
+        <div class="co-track" role="img" aria-label="${this._escape(`Battery ${this._number(soc, "%", 0)}, reserve ${this._number(reserve, "%", 0)}, target ${this._number(target, "%", 0)}`)}">
+          ${Number.isFinite(soc) ? `<div class="co-fill" style="width:${Math.max(0, Math.min(100, soc))}%"></div>` : ""}
+          ${Number.isFinite(reserve) ? `<i class="co-reserve" style="left:${Math.max(0, Math.min(100, reserve))}%"></i>` : ""}
+          ${Number.isFinite(target) ? `<i class="co-marker" style="left:${Math.max(0, Math.min(100, target))}%"></i>` : ""}</div>
+        <div class="co-battery-foot co-muted co-small"><span>${this._number(reserve, "%", 0)} reserve</span><span>${next ? `Next: ${next.action === "charge" ? "charge" : "supply home"} · ${this._escape(next.local_start)}–${this._escape(next.local_end)}` : 'Next period unavailable'}</span></div></section>
+      <section class="co-plan"><div class="co-plan-head"><div class="co-tabs" role="tablist" aria-label="Plan day"><button role="tab" id="co-today" data-day="today" data-focus="today" aria-selected="${isToday}" aria-controls="co-day">Today</button><button role="tab" id="co-tomorrow" data-day="tomorrow" data-focus="tomorrow" aria-selected="${!isToday}" aria-controls="co-day">Tomorrow</button></div><span class="co-muted co-small">${this._escape(attrs.date || (isToday ? "Today" : "Tomorrow"))}</span></div>
+        <div id="co-day" role="tabpanel" aria-labelledby="co-${isToday ? "today" : "tomorrow"}">
+          ${attrs.starting_below_reserve ? alert("Battery SOC starts below reserve. Charging back to reserve takes priority.") : ""}
+          ${shortfalls.length ? alert("Capacity shortfall · Some demand cannot be covered within your battery limits. Grid import may be needed; amounts are shown below.") : ""}
+          ${earlier.length ? `<details data-timeline="cosy-earlier"><summary data-focus="earlier">Earlier today · ${earlier.length} periods</summary>${this._cosyRows(earlier, true)}</details>` : ""}
+          ${remaining.length ? this._cosyRows(remaining, isToday) : `<p class="co-empty">${this._escape(attrs.reason || "Waiting for validated Cosy operating periods.")}</p>`}
+          <div class="co-metrics"><div><span class="co-muted co-small">Estimated net saving</span><strong>${this._money(validDay ? this._cosyNumber(attrs.estimated_net_saving_gbp) : NaN)}</strong></div><div><span class="co-muted co-small">Planned grid charge</span><strong>${this._number(validDay ? this._cosyNumber(attrs.planned_grid_charge_kwh) : NaN, " kWh", 2)}</strong></div></div>
+          ${validDay ? `<details data-timeline="cosy-details-${isToday ? "today" : "tomorrow"}"><summary data-focus="details">Cost breakdown &amp; plan details</summary><div class="co-detail">${this._cosyDetails(attrs, availablePv)}</div></details>` : ""}
+        </div></section>
+      <footer class="co-footer co-muted co-small"><span>${fresh ? `Battery updated ${this._cosyTime(decision.connection_last_successful_update)}` : "Battery update unavailable"} · ${validDay ? "Rates validated" : "Rates unavailable"}</span></footer>
+      <details class="co-controls" data-timeline="cosy-controls"><summary data-focus="controls"><ha-icon icon="mdi:tune-variant"></ha-icon> Controls</summary><div class="co-control-content">${this._cosySwitch(control, "Automatic control · beta", "auto")}${this._cosySwitch(daylightFlex, "Daylight Flex · 13:00–16:00", "flex")}<p class="co-muted co-small">Automatic control switches off after a restart. Daylight Flex waits for solar while enough cheap-rate charging time remains.</p><p class="co-error" role="alert">${this._escape(this._controlError || "")}</p></div></details>
+    </ha-card>`;
+    this._bindTimelines();
+    this._root.querySelectorAll("[data-day]").forEach(button => {
+      button.addEventListener("click", () => { this._selectedDay = button.dataset.day; this._renderIfNeeded(true); });
+      button.addEventListener("keydown", event => {
+        if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+          event.preventDefault();
+          this._selectedDay = event.key === "Home" ? "today" : event.key === "End" ? "tomorrow" : isToday ? "tomorrow" : "today";
+          this._renderIfNeeded(true);
+          this._root.querySelector(`[data-day="${this._selectedDay}"]`).focus();
+        }
+      });
+    });
+    this._root.querySelectorAll("button[data-switch]").forEach(button => {
+      button.addEventListener("click", () => this._toggleCosySwitch(button.dataset.switch));
+    });
+    if (focusKey) this._root.querySelector(`[data-focus="${focusKey}"]`)?.focus();
+  }
+
+  _cosySwitch(entity, label, key) {
+    const available = entity && ["on", "off"].includes(entity.state);
+    return `<div class="co-control-row"><span>${label}</span><button type="button" role="switch" data-focus="${key}" data-switch="${this._escape(entity?.entity_id || "")}" aria-label="${label}" aria-checked="${entity?.state === "on"}" ${!available || this._pendingSwitches?.has(entity.entity_id) ? "disabled" : ""}>${available ? entity.state === "on" ? "On" : "Off" : "Unavailable"}</button></div>`;
+  }
+
+  async _toggleCosySwitch(entityId) {
+    const state = this._hass.states[entityId];
+    if (!entityId.startsWith("switch.") || !state || !["on", "off"].includes(state.state)) return;
+    this._pendingSwitches ||= new Set();
+    if (this._pendingSwitches.has(entityId)) return;
+    this._pendingSwitches.add(entityId);
+    this._controlError = "";
+    this._renderIfNeeded(true);
+    try {
+      // Only the existing guarded switch is invoked, never a battery mode command.
+      await this._hass.callService("switch", state.state === "on" ? "turn_off" : "turn_on", { entity_id: entityId });
+    } catch (error) {
+      this._controlError = `Control could not be changed: ${error.message || error}`;
+    } finally {
+      this._pendingSwitches.delete(entityId);
+      this._renderIfNeeded(true);
+    }
+  }
+
+  _bindTimelines() {
+    this._root.querySelectorAll("details[data-timeline]").forEach((details) => {
+      details.open = this._openTimelines.has(details.dataset.timeline);
+      details.addEventListener("toggle", () => {
+        if (!details.isConnected) return;
+        if (details.open) this._openTimelines.add(details.dataset.timeline);
+        else this._openTimelines.delete(details.dataset.timeline);
+        this._saveOpenTimelines();
+      });
+    });
+  }
+
+  _cosyStyles() {
+    return `
+      :host { display:block; container-type:inline-size; }
+      * { box-sizing:border-box; }
+      .co-card { --co-accent:var(--primary-color,#7350b5); color:var(--primary-text-color); overflow:hidden; padding:0; border-radius:var(--ha-card-border-radius,20px); font-family:var(--paper-font-body1_-_font-family,Roboto,sans-serif); font-size:14px; line-height:1.45; }
+      h2,h3,p { margin:0; } button { font:inherit; color:inherit; cursor:pointer; } button:disabled { cursor:default; opacity:.55; }
+      .co-muted { color:var(--secondary-text-color); } .co-small { font-size:12px; } .co-warning { color:var(--warning-color,#a56700); } .co-success { color:var(--success-color,#168366); }
+      .co-header { padding:22px 24px 17px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+      .co-title { display:flex; align-items:center; gap:12px; min-width:0; } .co-title>ha-icon { padding:10px; width:42px; height:42px; flex:none; border-radius:14px; background:color-mix(in srgb,var(--co-accent) 10%,var(--ha-card-background,var(--card-background-color))); color:var(--co-accent); }
+      h2 { font-size:19px; font-weight:500; overflow-wrap:anywhere; } .co-badge { font-size:12px; text-align:right; }
+      .co-hero { margin:0 24px; padding:18px; border-radius:15px; background:color-mix(in srgb,var(--co-accent) 9%,var(--ha-card-background,var(--card-background-color))); }
+      .co-kicker { color:var(--co-accent); font-size:11px; font-weight:500; letter-spacing:1px; text-transform:uppercase; } h3 { font-size:23px; font-weight:500; letter-spacing:-.5px; margin:5px 0 3px; } .co-reason { font-size:13px; overflow-wrap:anywhere; }
+      .co-hero p { margin-top:8px; } .co-hero-foot { border-top:1px solid var(--divider-color); padding-top:12px; margin-top:13px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-size:12px; }
+      .co-battery { padding:20px 24px; } .co-battery-head,.co-battery-foot { display:flex; justify-content:space-between; align-items:baseline; gap:12px; } .co-battery-foot span:last-child { text-align:right; }
+      .co-soc { font-size:28px; font-weight:500; white-space:nowrap; } .co-soc span { font-weight:400; } .co-target { text-align:right; font-size:13px; }
+      .co-track { height:7px; background:var(--secondary-background-color); border-radius:8px; position:relative; margin:10px 0; } .co-fill { height:100%; border-radius:8px; background:var(--co-accent); } .co-marker,.co-reserve { position:absolute; width:2px; height:13px; top:-3px; transform:translateX(-1px); background:var(--primary-text-color); } .co-reserve { background:var(--secondary-text-color); height:11px; top:-2px; }
+      .co-plan { border-top:1px solid var(--divider-color); padding:17px 24px 0; } .co-plan-head { display:flex; justify-content:space-between; gap:12px; align-items:center; margin-bottom:13px; }
+      .co-tabs { display:flex; background:var(--secondary-background-color); padding:3px; gap:4px; border-radius:10px; } .co-tabs button { border:0; border-radius:7px; background:transparent; min-height:36px; padding:6px 12px; font-size:13px; } .co-tabs button[aria-selected=true] { background:var(--ha-card-background,var(--card-background-color)); box-shadow:0 1px 4px #00000015; font-weight:500; }
+      .co-row { display:grid; grid-template-columns:90px minmax(0,1fr) minmax(70px,auto); gap:12px; align-items:center; padding:11px 0; border-bottom:1px solid var(--divider-color); font-size:13px; }
+      .co-time { font-size:12px; font-variant-numeric:tabular-nums; } .co-now { display:block; color:var(--co-accent); font-size:11px; font-weight:500; margin-top:3px; } .co-action { font-weight:500; } .co-row .co-small { font-size:11px; } .co-rate { text-align:right; font-weight:500; font-variant-numeric:tabular-nums; } .co-rate span { display:block; font-weight:400; } .co-dot { display:inline-block; height:5px; width:5px; border-radius:50%; margin-right:4px; vertical-align:middle; background:var(--secondary-text-color); } .co-dot.cheap { background:var(--success-color,#168366); } .co-dot.peak { background:var(--error-color,#db5365); }
+      details { border-bottom:1px solid var(--divider-color); } summary { cursor:pointer; padding:13px 0; font-size:12px; color:var(--secondary-text-color); } summary:focus-visible,button:focus-visible { outline:2px solid var(--co-accent); outline-offset:2px; }
+      .co-metrics { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:17px 0 2px; } .co-metrics strong { display:block; font-size:20px; font-weight:500; margin-top:3px; }
+      .co-detail { color:var(--secondary-text-color); font-size:12px; padding-bottom:14px; } dl { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:7px; margin:0; } dt,dd { margin:0; overflow-wrap:anywhere; } dd { text-align:right; color:var(--primary-text-color); } .co-detail p { margin-top:12px; }
+      .co-alert { padding:12px; margin:12px 24px 0; border-radius:10px; color:var(--primary-text-color); border-left:3px solid var(--warning-color,#a56700); background:var(--secondary-background-color); font-size:12px; } .co-plan .co-alert { margin:0 0 10px; } .co-empty { color:var(--secondary-text-color); padding:14px 0; }
+      .co-footer { padding:13px 24px 0; font-size:11px; } .co-controls { margin:0 24px; border:0; } .co-controls summary { text-align:right; } .co-controls ha-icon { --mdc-icon-size:17px; margin-right:4px; } .co-control-content { padding-bottom:16px; } .co-control-row { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:8px 0; font-size:13px; } .co-control-row button { border:1px solid var(--divider-color); border-radius:20px; min-width:54px; min-height:36px; padding:6px 12px; background:var(--secondary-background-color); } .co-control-row button[aria-checked=true] { background:var(--co-accent); color:var(--text-primary-color,#fff); } .co-error { font-size:12px; color:var(--error-color); margin-top:8px; overflow-wrap:anywhere; }
+      @container(max-width:420px) { .co-header { padding:18px 16px; } .co-title>ha-icon { display:none; } h2 { font-size:17px; } .co-hero { margin:0 16px; padding:15px; } .co-battery,.co-plan { padding-left:16px; padding-right:16px; } .co-row { grid-template-columns:76px minmax(0,1fr) minmax(64px,auto); gap:8px; } .co-footer { padding-left:16px; padding-right:16px; } .co-controls { margin:0 16px; } .co-alert { margin-left:16px; margin-right:16px; } }
+      @media(pointer:coarse) { button,summary { min-height:44px!important; } }
+    `;
+  }
+
   render(today, tomorrow, shadow, control, daylightFlex, availablePv) {
     if (!this._hass) return;
     this._loadOpenTimelines();
-    this.querySelectorAll("details[data-timeline]").forEach((details) => {
+    this._root.querySelectorAll("details[data-timeline]").forEach((details) => {
       if (details.open) this._openTimelines.add(details.dataset.timeline);
       else this._openTimelines.delete(details.dataset.timeline);
     });
@@ -315,7 +568,11 @@ class AferiyAgilePlanCard extends HTMLElement {
       || tomorrow?.attributes?.tariff_name
       || "Octopus Agile";
     const isCosy = tariffName === "Cosy Octopus";
-    this.innerHTML = `<ha-card>
+    if (isCosy) {
+      this._renderCosy(today, tomorrow, shadow, control, daylightFlex, availablePv);
+      return;
+    }
+    this._root.innerHTML = `<ha-card>
       <style>
         ha-card { padding: 16px; overflow: hidden; }
         h2, h3, h4, p { margin: 0; } h2 { font-size: 20px; } h3 { font-size: 18px; }
@@ -366,14 +623,7 @@ class AferiyAgilePlanCard extends HTMLElement {
       ${this._day(today, "Today")}
       ${this._day(tomorrow, "Tomorrow")}
     </ha-card>`;
-    this.querySelectorAll("details[data-timeline]").forEach((details) => {
-      details.open = this._openTimelines.has(details.dataset.timeline);
-      details.addEventListener("toggle", () => {
-        if (details.open) this._openTimelines.add(details.dataset.timeline);
-        else this._openTimelines.delete(details.dataset.timeline);
-        this._saveOpenTimelines();
-      });
-    });
+    this._bindTimelines();
   }
 }
 

@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.29-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.30-blue.svg)](CHANGELOG.md)
 
 Private Home Assistant fork combining local AFERIY PS240 monitoring with a
 safe Octopus Agile battery planner and opt-in guarded automation.
@@ -149,7 +149,7 @@ For a dedicated dashboard area, register this JavaScript module under
 **Settings → Dashboards → Resources**:
 
 ```text
-/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.29
+/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.30
 ```
 
 Then add **AFERIY Wi-Fi Loss Recovery** from the card picker, or use:
@@ -245,7 +245,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.29`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.30`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 
@@ -313,6 +313,30 @@ from the AFERIY device, such as:
 The separate **AFERIY Overnight Plan** card describes the inherited
 fixed-window scheduler. Do not add it to the Agile dashboard unless you switch
 away from Octopus Agile and deliberately use a fixed-window tariff.
+
+### Cosy card layout
+
+With **Cosy Octopus** selected, the existing `custom:aferiy-agile-plan-card`
+automatically uses the redesigned layout. No replacement card is needed.
+
+- Current action, controller status, live battery SOC, next charge target, and
+  next tariff period appear first. The live header stays visible on both day tabs.
+- **Today / Tomorrow** selects the schedule and estimates; earlier Today periods
+  are collapsed. All seven tariff periods remain accessible.
+- **Cost breakdown & plan details** contains energy, costs, SOC projections,
+  battery limits, PV source, and calculation assumptions.
+- **Controls** contains explicit Automatic Control and Daylight Flex switches.
+  These use the existing guarded Home Assistant switches. Opening or refreshing
+  the card never enables control. Automatic Control remains off after restart.
+- Missing rates, stale battery telemetry, blocked control, and capacity shortfalls
+  are shown explicitly. Prices are read from the validated plan, never hard-coded.
+
+After updating to **1.8.30**, restart Home Assistant and change the dashboard
+resource to `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.30`, then
+hard-refresh your browser or reopen the mobile app. The Agile layout is retained.
+If you have multiple battery systems, set the Today, Tomorrow, shadow, PV,
+`cosy_control_entity`, and `cosy_daylight_flex_entity` overrides explicitly;
+ambiguous entity matches are not selected automatically.
 
 The card provides separate Today and Tomorrow plans with:
 
@@ -618,7 +642,7 @@ off-peak window and any SMART forecast/demand tuning that has been applied.
 To make it available in Home Assistant's card picker:
 
 1. Restart Home Assistant after installing or updating the integration.
-2. Add dashboard resource `/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.29`
+2. Add dashboard resource `/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.30`
    as a JavaScript module.
 3. Edit a dashboard, choose Add card, switch to By card, and search for
    `AFERIY Overnight Plan`.

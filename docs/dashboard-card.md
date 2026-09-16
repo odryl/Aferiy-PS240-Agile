@@ -9,7 +9,7 @@ Post-Sunset Need, useful solar, confidence, and SMART History completeness.
 After installing or updating the integration and restarting Home Assistant, add this dashboard resource:
 
 ```text
-/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.29
+/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.30
 ```
 
 Set the resource type to:
@@ -49,7 +49,7 @@ The card reads the calculation from the Recommended Overnight SOC sensor. It doe
 The separate guarded recovery card is available at:
 
 ```text
-/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.29
+/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.30
 ```
 
 After registering it as a JavaScript module, add **AFERIY Wi-Fi Loss Recovery**
@@ -65,3 +65,24 @@ The card shows whether the PS240 is available, the current and next Linksys
 switch. Its 0–60 minute grace-period control is persisted by the integration;
 valid telemetry before the deadline cancels the channel change. It never
 receives or displays router credentials or Wi-Fi passphrases.
+
+## Cosy Octopus Battery Plan
+
+Register `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.30` as a JavaScript
+module and use `type: custom:aferiy-agile-plan-card`. Selecting Cosy Octopus in
+the integration selects the compact Cosy layout automatically.
+
+The live header shows the actual controller mode when active and explicitly
+labels the recommendation as advisory when Automatic Control is off. Battery
+SOC comes from fresh shadow-decision telemetry, not the plan's starting SOC.
+Today/Tomorrow tabs change only the schedule and estimates. Open sections and
+the selected day survive live refreshes for the life of the card; expanded
+sections also persist in browser session storage.
+
+Controls invoke only the existing guarded Cosy switches following a user click.
+The card does not calculate charge targets or send battery mode commands. The
+controller's inhibition and error reasons remain visible. Agile retains its
+existing half-hour schedule.
+
+After upgrading, restart Home Assistant, update the resource version, and refresh
+the dashboard. Existing YAML remains compatible.

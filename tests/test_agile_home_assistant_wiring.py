@@ -195,7 +195,9 @@ def test_agile_control_is_explicit_guarded_and_recoverable() -> None:
 def test_agile_card_surfaces_but_does_not_silently_enable_control() -> None:
     assert '"_agile_automated_control"' in CARD_SOURCE
     assert "automated control:" in CARD_SOURCE
-    assert "callService" not in CARD_SOURCE
+    assert 'await this._hass.callService("switch",' in CARD_SOURCE
+    assert 'button.addEventListener("click", () => this._toggleCosySwitch' in CARD_SOURCE
+    assert 'callService("select"' not in CARD_SOURCE
     assert '"_cosy_automated_control"' in CARD_SOURCE
     assert '"Cosy Automated Control"' in CARD_SOURCE
     assert '"_cosy_daylight_flex"' in CARD_SOURCE

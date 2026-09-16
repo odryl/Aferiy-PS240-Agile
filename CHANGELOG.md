@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.30
+
+- Redesign the Cosy Octopus Battery Plan around the current action, live battery SOC, next charge target, and next tariff period.
+- Add Today/Tomorrow tabs, a compact seven-period schedule with earlier periods folded away, and expandable cost and planning details.
+- Add explicit Automatic Control and Daylight Flex controls through the existing guarded switches, with unavailable, pending, and error handling.
+- Highlight advisory mode, controller inhibition, stale telemetry, missing rates, and battery capacity shortfalls. Never display missing numeric data as zero.
+- Preserve open sections and keyboard focus during live updates; scope styling to the card and support narrow dashboard columns and Home Assistant themes.
+- Keep Agile’s existing half-hour view and add automated frontend behavior checks.
+
 ## 1.8.29
 
 - Replace Cosy's 48-row half-hour card schedule with seven meaningful cheap,
