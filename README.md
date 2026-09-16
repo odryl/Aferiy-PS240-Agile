@@ -715,6 +715,7 @@ output-register behaviour remain experimental.
 
 ## Documentation
 
+- [Maintainer and Home Assistant handover](docs/HANDOVER.md)
 - [Entities](docs/entities.md)
 - [Dashboard Card](docs/dashboard-card.md)
 - [Troubleshooting](docs/troubleshooting.md)
