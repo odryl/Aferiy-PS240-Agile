@@ -428,6 +428,18 @@ def test_automated_charge_window_honours_partial_slot_and_rejects_bad_windows() 
     assert window is not None
     assert window[0].isoformat() == "2026-08-24T13:00:00+01:00"
     assert window[1].isoformat() == "2026-08-24T13:15:00+01:00"
+    utc_window = AGILE.bounded_agile_command_window(
+        "Charge",
+        {
+            **attributes,
+            "planned_slot_start": "2026-08-24T12:00:00+00:00",
+            "planned_slot_end": "2026-08-24T12:30:00+00:00",
+        },
+        now,
+    )
+    assert utc_window is not None
+    assert utc_window[0].isoformat() == "2026-08-24T13:00:00+01:00"
+    assert utc_window[1].isoformat() == "2026-08-24T13:15:00+01:00"
     assert (
         AGILE.bounded_agile_command_window(
             "Charge",
@@ -725,6 +737,30 @@ def test_cosy_half_hour_rates_produce_fixed_daily_operating_schedule() -> None:
     assert evening["required_cover_kwh"] == 3.4
     assert plan["cosy_max_battery_output_w"] == 850
     assert plan["cosy_max_battery_output_per_half_hour_kwh"] == 0.425
+    assert plan["cosy_period_count"] == 7
+    assert [
+        (period["local_start"], period["local_end"], period["cosy_rate_band"]) for period in plan["cosy_periods"]
+    ] == [
+        ("00:00", "04:00", "standard"),
+        ("04:00", "07:00", "cheap"),
+        ("07:00", "13:00", "standard"),
+        ("13:00", "16:00", "cheap"),
+        ("16:00", "19:00", "peak"),
+        ("19:00", "22:00", "standard"),
+        ("22:00", "00:00", "cheap"),
+    ]
+
+    live_action = AGILE.cosy_period_action(
+        plan,
+        datetime(2026, 7, 27, 15, 36, tzinfo=ZoneInfo("Europe/London")),
+    )
+    assert live_action is not None
+    assert live_action["decision_source"] == "current_cosy_period"
+    assert live_action["local_start"] == "13:00"
+    assert live_action["local_end"] == "16:00"
+    assert live_action["start"].endswith("15:30:00+01:00")
+    assert live_action["end"].endswith("16:00:00+01:00")
+    assert live_action["duration_minutes"] == 30.0
 
 
 def test_cosy_targets_respect_configured_charge_and_discharge_limits() -> None:

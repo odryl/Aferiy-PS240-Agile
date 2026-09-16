@@ -63,18 +63,21 @@ shadow plan executed. Schema-v3 exports therefore include operating mode,
 connection freshness, local-command context, and the shadow decision so those
 samples can be classified separately.
 
-The operating state machine locks upcoming charge/discharge actions before their
-half-hour boundary. It keeps Self-Gen while useful PV is present, permits Idle
-only after PV has remained negligible for 15 minutes and a later selected
-discharge remains, and recommends Self-Gen on stale telemetry, invalid rates,
-or reserve protection. Planned grid charging is also deferred when useful live
-PV is already present or the target SOC has been reached.
+The Agile operating state machine locks upcoming charge/discharge actions before
+their half-hour boundary. Cosy instead selects its exact current cheap, standard,
+or peak period directly and may change its decision on any poll. It keeps
+Self-Gen while useful PV is present, permits Idle only after PV has remained
+negligible for 15 minutes and a later selected discharge remains, and recommends
+Self-Gen on stale telemetry, invalid rates, or reserve protection. Planned grid
+charging is also deferred when useful live PV is already present or the target
+SOC has been reached.
 
 When explicitly enabled, the guarded controller requires two distinct healthy
 polls before starting Charge or Idle, caps AC Charge at 1200 W, constrains custom
-commands to the selected half-hour/partial period, and verifies every register
-write. Profitable discharge always selects Self-Gen/Zero Export so the PS240 CT
-loop follows household load; fixed Discharge and Feed are forbidden.
+commands to a maximum 30-minute recoverable window within the selected period,
+and verifies every register write. Profitable discharge always selects
+Self-Gen/Zero Export so the PS240 CT loop follows household load; fixed
+Discharge and Feed are forbidden.
 
 Each tariff has a separate controller toggle. The controller interlocks against
 the legacy overnight scheduler, the wrong selected tariff, the other rate-plan

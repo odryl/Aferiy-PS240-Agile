@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.8.29
+
+- Replace Cosy's 48-row half-hour card schedule with seven meaningful cheap,
+  standard, and peak tariff/operating periods. Highlight the live period and
+  show its price, target, purpose, duration, and any capacity shortfall.
+- Publish validated `cosy_periods` plan data and select the active Cosy action
+  directly from its exact local-time period. Half-hour records remain internal
+  for Octopus validation and short, recoverable device-command renewal only.
+- Normalize UTC Octopus slot timestamps into Home Assistant local time before
+  constructing device schedules, while retaining Agile's detailed half-hour
+  price and action display.
+
 ## 1.8.28
 
 - Fix false **Solar Charge Deferred** decisions when PV is 0 W. The planner

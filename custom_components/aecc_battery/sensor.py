@@ -36,6 +36,7 @@ from .agile import (
     apply_cosy_rate_schedule,
     build_agile_day_plan,
     build_agile_shadow_decision,
+    cosy_period_action,
     validate_octopus_rate_source,
 )
 from .const import (
@@ -1140,6 +1141,11 @@ class AeccAgileShadowOperatingStateSensor(
         plan: dict[str, Any] | None,
         now: datetime,
     ) -> dict[str, Any] | None:
+        period_action = cosy_period_action(plan, now)
+        if period_action is not None:
+            self._locked_actions.clear()
+            return period_action
+
         for key in list(self._locked_actions):
             try:
                 if datetime.fromisoformat(key) + timedelta(minutes=30) <= now:

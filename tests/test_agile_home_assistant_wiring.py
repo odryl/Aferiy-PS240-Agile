@@ -141,6 +141,9 @@ def test_card_discovers_entities_and_exposes_energy_costs_and_savings() -> None:
     assert 'attrs.tariff_name || "Octopus Agile"' in CARD_SOURCE
     assert 'tariffName === "Cosy Octopus"' in CARD_SOURCE
     assert 'attrs.tariff_strategy === "cosy_fixed_daily_schedule"' in CARD_SOURCE
+    assert "attrs.cosy_periods" in CARD_SOURCE
+    assert "Cosy tariff and operating periods" in CARD_SOURCE
+    assert "this._cosyPeriodRows(cosyPeriods)" in CARD_SOURCE
     assert "Charge to target" in CARD_SOURCE
     assert "CT-controlled" in CARD_SOURCE
     assert "Rolling horizon active" in CARD_SOURCE

@@ -16,7 +16,7 @@ _DEFAULT_MINIMUM_SAVING_GBP_PER_KWH = 0.03
 _REQUIRED_SOURCE_ATTRIBUTES = ("mpan", "serial_number", "tariff_code")
 _PLANNER_REVISION = 3
 _SHADOW_DECISION_REVISION = 1
-_COSY_SCHEDULE_REVISION = 3
+_COSY_SCHEDULE_REVISION = 4
 _COSY_MAX_BATTERY_OUTPUT_W = 850
 _COSY_DAYLIGHT_FLEX_COMMAND_MARGIN_MINUTES = 2
 
@@ -674,6 +674,7 @@ def apply_cosy_rate_schedule(
         if 240 <= minute < 420 or 780 <= minute < 960 or 1320 <= minute:
             action = "charge"
             phase = "cheap_charge"
+            rate_band = "cheap"
             cover_slots, cover_until = cheap_period_cover(minute)
             required_cover_kwh = cover_slots * max_output_per_slot_kwh
             required_target_soc = min(
@@ -689,6 +690,7 @@ def apply_cosy_rate_schedule(
         else:
             action = "self_gen"
             phase = "self_gen"
+            rate_band = "peak" if 960 <= minute < 1140 else "standard"
             command_power_limit_w = int(
                 scheduled.get("max_system_discharge_power_w") or _SAFE_AGILE_DISCHARGE_POWER_CEILING_W
             )
@@ -711,6 +713,7 @@ def apply_cosy_rate_schedule(
                 "action": action,
                 "economic_action": economic_action,
                 "tariff_phase": phase,
+                "cosy_rate_band": rate_band,
                 "command_power_limit_w": command_power_limit_w,
                 "duration_minutes": duration_minutes,
             }
@@ -726,6 +729,67 @@ def apply_cosy_rate_schedule(
                 }
             )
         slots.append(slot)
+
+    cosy_periods: list[dict[str, Any]] = []
+    for slot in slots:
+        try:
+            slot_start = datetime.fromisoformat(str(slot["start"]))
+            slot_end = datetime.fromisoformat(str(slot["end"]))
+            slot_rate = float(slot["rate_gbp_per_kwh"])
+        except (KeyError, TypeError, ValueError):
+            return _invalid_plan("A Cosy plan slot could not be grouped into tariff periods.")
+        if slot_start.tzinfo is None or slot_end.tzinfo is None or not isfinite(slot_rate):
+            return _invalid_plan("A Cosy plan slot has invalid period timing or pricing.")
+        grouping_key = (
+            slot.get("action"),
+            slot.get("tariff_phase"),
+            slot.get("cosy_rate_band"),
+            slot.get("slot_target_soc"),
+        )
+        previous = cosy_periods[-1] if cosy_periods else None
+        if (
+            previous is not None
+            and previous["_grouping_key"] == grouping_key
+            and previous["end"] == slot_start.isoformat()
+        ):
+            previous["end"] = slot_end.isoformat()
+            previous["local_end"] = slot_end.astimezone(local_zone).strftime("%H:%M")
+            previous["duration_minutes"] = round(
+                (slot_end - datetime.fromisoformat(previous["start"])).total_seconds() / 60,
+                1,
+            )
+            previous["_rates"].append(slot_rate)
+            continue
+        period = {
+            "_grouping_key": grouping_key,
+            "_rates": [slot_rate],
+            "start": slot_start.isoformat(),
+            "end": slot_end.isoformat(),
+            "local_start": slot_start.astimezone(local_zone).strftime("%H:%M"),
+            "local_end": slot_end.astimezone(local_zone).strftime("%H:%M"),
+            "duration_minutes": round((slot_end - slot_start).total_seconds() / 60, 1),
+            "action": slot.get("action"),
+            "tariff_phase": slot.get("tariff_phase"),
+            "cosy_rate_band": slot.get("cosy_rate_band"),
+            "command_power_limit_w": slot.get("command_power_limit_w"),
+        }
+        for key in (
+            "slot_target_soc",
+            "cover_until",
+            "cover_periods",
+            "required_cover_kwh",
+            "cover_shortfall_kwh",
+        ):
+            if key in slot:
+                period[key] = slot[key]
+        cosy_periods.append(period)
+
+    for period in cosy_periods:
+        rates = period.pop("_rates")
+        period.pop("_grouping_key")
+        period["rate_gbp_per_kwh"] = round(sum(rates) / len(rates), 5)
+        period["minimum_rate_gbp_per_kwh"] = round(min(rates), 5)
+        period["maximum_rate_gbp_per_kwh"] = round(max(rates), 5)
 
     scheduled.update(
         {
@@ -743,6 +807,8 @@ def apply_cosy_rate_schedule(
             "scheduled_charge_periods": phase_counts["cheap_charge"],
             "scheduled_idle_periods": 0,
             "scheduled_self_gen_periods": phase_counts["self_gen"],
+            "cosy_period_count": len(cosy_periods),
+            "cosy_periods": cosy_periods,
             "schedule_note": (
                 "Each cheap period charges only to the SOC needed to cover the next "
                 f"non-cheap block at up to {max_output_w} W ("
@@ -754,6 +820,55 @@ def apply_cosy_rate_schedule(
         }
     )
     return scheduled
+
+
+def cosy_period_action(
+    plan: Mapping[str, Any] | None,
+    now: datetime,
+) -> dict[str, Any] | None:
+    """Return the exact current Cosy period with a safely bounded command window."""
+    if now.tzinfo is None or not plan or plan.get("tariff_strategy") != "cosy_fixed_daily_schedule":
+        return None
+    periods = plan.get("cosy_periods")
+    if not isinstance(periods, list):
+        return None
+    for raw_period in periods:
+        if not isinstance(raw_period, Mapping) or raw_period.get("action") not in {
+            "charge",
+            "self_gen",
+        }:
+            continue
+        try:
+            period_start = datetime.fromisoformat(str(raw_period.get("start")))
+            period_end = datetime.fromisoformat(str(raw_period.get("end")))
+        except (TypeError, ValueError):
+            continue
+        period_start = period_start.astimezone(now.tzinfo)
+        period_end = period_end.astimezone(now.tzinfo)
+        if period_start.tzinfo is None or period_end.tzinfo is None or not period_start <= now < period_end:
+            continue
+        command_start = max(
+            period_start,
+            now.replace(
+                minute=(now.minute // 30) * 30,
+                second=0,
+                microsecond=0,
+            ),
+        )
+        command_end = min(period_end, command_start + timedelta(minutes=30))
+        return {
+            **dict(raw_period),
+            "start": command_start.isoformat(),
+            "end": command_end.isoformat(),
+            "duration_minutes": round(
+                (command_end - command_start).total_seconds() / 60,
+                1,
+            ),
+            "period_start": period_start.isoformat(),
+            "period_end": period_end.isoformat(),
+            "decision_source": "current_cosy_period",
+        }
+    return None
 
 
 def build_agile_shadow_decision(
@@ -828,6 +943,8 @@ def build_agile_shadow_decision(
         "planned_slot_energy_kwh": action.get("energy_kwh"),
         "planned_slot_power_limit_w": action.get("command_power_limit_w"),
         "planned_slot_duration_minutes": action.get("duration_minutes"),
+        "planned_period_start": action.get("period_start"),
+        "planned_period_end": action.get("period_end"),
         "target_soc": action.get("slot_target_soc", plan.get("target_soc")),
         "plan_target_soc": plan.get("target_soc"),
         "tariff_strategy": plan.get("tariff_strategy"),
@@ -1106,6 +1223,8 @@ def bounded_agile_command_window(
             return None
         if start.tzinfo is None or end.tzinfo is None:
             return None
+        start = start.astimezone(now.tzinfo)
+        end = end.astimezone(now.tzinfo)
         try:
             planned_minutes = float(attributes.get("planned_slot_duration_minutes"))
         except (TypeError, ValueError):

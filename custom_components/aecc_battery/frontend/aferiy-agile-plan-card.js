@@ -205,6 +205,37 @@ class AferiyAgilePlanCard extends HTMLElement {
     </table></div>`;
   }
 
+  _cosyPeriodPrice(period) {
+    const minimum = Number(period.minimum_rate_gbp_per_kwh);
+    const maximum = Number(period.maximum_rate_gbp_per_kwh);
+    if (Number.isFinite(minimum) && Number.isFinite(maximum) && Math.abs(maximum - minimum) > 0.000001) {
+      return `${this._rate(minimum)}–${this._rate(maximum)}/kWh`;
+    }
+    return `${this._rate(period.rate_gbp_per_kwh)}/kWh`;
+  }
+
+  _cosyPeriodRows(periods) {
+    if (!periods.length) return `<p class="empty">Waiting for the validated Cosy operating periods.</p>`;
+    const now = Date.now();
+    return `<div class="cosy-periods">
+      ${periods.map((period) => {
+        const current = this._isCurrent(period, now);
+        const target = Number(period.slot_target_soc);
+        const shortfall = Number(period.cover_shortfall_kwh);
+        const purpose = period.action === "charge"
+          ? `PV-first charge / Idle to ${Number.isFinite(target) ? `${target.toFixed(0)}%` : "target"} · cover to ${this._escape(period.cover_until || "next cheap period")}${Number.isFinite(shortfall) && shortfall > 0 ? ` · <strong>${this._number(shortfall, " kWh", 2)} capacity shortfall</strong>` : ""}`
+          : period.cosy_rate_band === "peak"
+            ? "Peak protection · CT-controlled household supply"
+            : "Self-consumption · CT-controlled zero export";
+        return `<div class="cosy-period ${this._escape(period.action)} ${current ? "current" : ""}">
+          <div class="period-time"><strong>${current ? "Now · " : ""}${this._escape(period.local_start)}–${this._escape(period.local_end)}</strong><span>${this._escape(period.cosy_rate_band || "standard")} rate</span></div>
+          <div class="period-plan"><strong>${this._escape(this._actionLabel(period.action, period))}</strong><span>${purpose}</span></div>
+          <div class="period-price"><strong>${this._cosyPeriodPrice(period)}</strong><span>${this._number(period.duration_minutes, " min", 0)}</span></div>
+        </div>`;
+      }).join("")}
+    </div>`;
+  }
+
   _rateTimeline(slots, cheapestRate, timelineKey, tariffName) {
     if (!slots.length) return "";
     const now = Date.now();
@@ -224,7 +255,9 @@ class AferiyAgilePlanCard extends HTMLElement {
     if (!state) return `<section><h3>${label}</h3><p>Waiting for the Proposed Plan sensor.</p></section>`;
     const attrs = state.attributes || {};
     const tariffName = attrs.tariff_name || "Octopus Agile";
+    const isCosy = attrs.tariff_strategy === "cosy_fixed_daily_schedule";
     const slots = attrs.slots || [];
+    const cosyPeriods = Array.isArray(attrs.cosy_periods) ? attrs.cosy_periods : [];
     const statusClass = String(attrs.status || state.state).toLowerCase().replaceAll("_", "-");
     const conservativeTomorrow = attrs.starting_soc_source === "conservative_reserve_assumption";
     const recoveringReserve = attrs.starting_below_reserve === true;
@@ -260,12 +293,13 @@ class AferiyAgilePlanCard extends HTMLElement {
         <span>Discharged-energy replacement ${this._money(attrs.estimated_discharge_replacement_cost_gbp)} at ${this._rate(attrs.delivered_replacement_cost_gbp_per_kwh)}/kWh</span>
         <span>Replacement prices: ${this._escape(attrs.replacement_rate_source === "next_day_published_rates" ? "published tomorrow" : "same day")}</span>
         <span>Reserve ${this._number(attrs.reserve_soc, "%", 0)}</span>
+        <span>Battery capacity ${this._number(attrs.battery_capacity_kwh, " kWh", 3)}</span>
         <span>AC charge limit ${this._number(attrs.max_system_charge_power_w, " W", 0)}</span>
         <span>Self-Gen house output ${this._number(attrs.max_system_discharge_power_w, " W", 0)}</span>
       </div>
-      <h4>Battery operating schedule</h4>
-      ${this._activeRows(slots, tariffName)}
-      ${this._rateTimeline(slots, cheapestRate, label.toLowerCase(), tariffName)}
+      <h4>${isCosy ? "Cosy tariff and operating periods" : "Battery operating schedule"}</h4>
+      ${isCosy ? this._cosyPeriodRows(cosyPeriods) : this._activeRows(slots, tariffName)}
+      ${isCosy ? "" : this._rateTimeline(slots, cheapestRate, label.toLowerCase(), tariffName)}
       <p class="footnote">${this._escape(attrs.cost_estimate_note || "Costs are estimates, not a complete electricity bill.")}</p>
     </section>`;
   }
@@ -307,6 +341,11 @@ class AferiyAgilePlanCard extends HTMLElement {
         .action { text-transform: capitalize; font-weight: 700; } tr.charge .action, .cost { color: #2196f3; } tr.discharge .action { color: #f57c00; }
         tr.self_gen .action, .self-gen { color: #f57c00; } tr.idle .action, .idle { color: #7e57c2; }
         .saving { color: var(--success-color, #43a047); font-weight: 700; } .empty { color: var(--secondary-text-color); padding: 8px 0; }
+        .cosy-periods { display: grid; gap: 7px; }
+        .cosy-period { display: grid; grid-template-columns: minmax(120px, .8fr) minmax(250px, 2fr) minmax(105px, .8fr); gap: 12px; align-items: center; padding: 10px; border-radius: 9px; background: var(--secondary-background-color); border-left: 4px solid #f57c00; }
+        .cosy-period.charge { border-left-color: #2196f3; } .cosy-period.current { outline: 2px solid var(--primary-color); outline-offset: 1px; }
+        .cosy-period span { display: block; margin-top: 3px; color: var(--secondary-text-color); font-size: 11px; }
+        .period-price { text-align: right; }
         details { margin-top: 14px; } summary { cursor: pointer; font-weight: 600; }
         .rates { display: grid; grid-template-columns: repeat(8, minmax(54px, 1fr)); gap: 4px; margin-top: 8px; }
         .rate { background: var(--secondary-background-color); border-radius: 6px; padding: 5px; text-align: center; font-size: 10px; border-bottom: 3px solid transparent; }
@@ -316,7 +355,7 @@ class AferiyAgilePlanCard extends HTMLElement {
         .rate.medium { background: #ffe0b2; color: #472400; } .rate.high { background: #ffcdd2; color: #4a1015; }
         .rate.current { outline: 2px solid var(--primary-color); outline-offset: 1px; font-weight: 700; }
         .footnote { margin-top: 12px; font-size: 11px; }
-        @media (max-width: 700px) { .metrics { grid-template-columns: repeat(2, minmax(110px, 1fr)); } .rates { grid-template-columns: repeat(4, minmax(54px, 1fr)); } }
+        @media (max-width: 700px) { .metrics { grid-template-columns: repeat(2, minmax(110px, 1fr)); } .rates { grid-template-columns: repeat(4, minmax(54px, 1fr)); } .cosy-period { grid-template-columns: 1fr; gap: 6px; } .period-price { text-align: left; } }
       </style>
       <h2>${this._escape(this.config.title || `${tariffName} Battery Plan`)}</h2>
       <p class="subtitle">Today and tomorrow · price-aware planning${control?.state === "on" ? " · automated control enabled" : " · shadow-only while control is off"}</p>
