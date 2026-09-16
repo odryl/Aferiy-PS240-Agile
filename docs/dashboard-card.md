@@ -15,7 +15,7 @@ Post-Sunset Need, useful solar, confidence, and SMART History completeness.
 After installing or updating the integration and restarting Home Assistant, add this dashboard resource:
 
 ```text
-/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.31
+/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.32
 ```
 
 Set the resource type to:
@@ -55,7 +55,7 @@ The card reads the calculation from the Recommended Overnight SOC sensor. It doe
 The separate guarded recovery card is available at:
 
 ```text
-/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.31
+/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.32
 ```
 
 After registering it as a JavaScript module, add **AFERIY Wi-Fi Loss Recovery**
@@ -74,7 +74,7 @@ receives or displays router credentials or Wi-Fi passphrases.
 
 ## Cosy Octopus Battery Plan
 
-Register `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.31` as a JavaScript
+Register `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.32` as a JavaScript
 module and use `type: custom:aferiy-agile-plan-card`. Selecting Cosy Octopus in
 the integration selects the compact Cosy layout automatically.
 
@@ -110,7 +110,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.31`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.32`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 

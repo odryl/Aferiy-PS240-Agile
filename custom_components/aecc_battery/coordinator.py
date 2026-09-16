@@ -880,10 +880,10 @@ class AeccBatteryCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return DeviceInfo(
             identifiers={(DOMAIN, identifier)},
             name=self.device_name,
-            manufacturer="Richard Owen",
+            manufacturer="odryl",
             model=self._model or None,
             sw_version=self.firmware_version,
-            configuration_url="https://github.com/MortUK/Aferiy-PS240-Local-",
+            configuration_url="https://github.com/odryl/Aferiy-PS240-Agile",
         )
 
     @property

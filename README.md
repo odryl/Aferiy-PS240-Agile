@@ -3,7 +3,7 @@
 ![AFERIY PS240 local battery control for Home Assistant](docs/images/aferiy-ps240-readme-hero.jpeg)
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://www.hacs.xyz/)
-[![Version](https://img.shields.io/badge/version-v1.8.31-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.8.32-blue.svg)](CHANGELOG.md)
 
 Local Home Assistant control for the **AFERIY PS240** battery, plus two
 tariff-aware planners for Octopus Energy customers in the UK:
@@ -115,7 +115,7 @@ it. Otherwise copy `custom_components/aecc_battery` from a clone into
    set the **Energy Tariff** to Cosy or Agile, then save.
 
 Then add the dashboard card: register
-`/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.31` as a JavaScript module
+`/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.32` as a JavaScript module
 under **Settings → Dashboards → Resources** and add
 `type: custom:aferiy-agile-plan-card`. See
 [Dashboard card](docs/dashboard-card.md).

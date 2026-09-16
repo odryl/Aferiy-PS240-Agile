@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.8.32
+
+- Remove the inherited Buy Me a Coffee funding link so the repository no longer
+  solicits donations for the upstream fork's maintainer.
+- Point the Home Assistant device page link and the Overnight Plan card's
+  documentation link at this fork instead of the upstream project, so in-product
+  links reach the documentation that matches the installed version.
+- Show the device Manufacturer as **odryl**, making it clear that this is a fork
+  rather than vendor or upstream support. Attribution for the local protocol
+  implementation remains in the README, the LICENSE, and the code comments.
+
 ## 1.8.31
 
 - Plan Octopus **Weekend Happy Hours** inside the Cosy Octopus schedule. Booked

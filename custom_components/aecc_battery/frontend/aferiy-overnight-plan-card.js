@@ -564,5 +564,5 @@ window.customCards.push({
   name: "AFERIY Overnight Plan",
   description: "Shows the PS240 smart overnight charge target, solar forecast balance, reserves, and history confidence.",
   preview: true,
-  documentationURL: "https://github.com/MortUK/Aferiy-PS240-Local-",
+  documentationURL: "https://github.com/odryl/Aferiy-PS240-Agile",
 });
