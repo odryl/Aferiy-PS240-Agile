@@ -21,6 +21,8 @@ Core entities focus on data and controls that come directly from the local batte
 - Wi-Fi Loss Recovery (configuration switch; off by default)
 - Cosy Automated Control and Cosy Daylight Flex (configuration switches; off by default)
 - Available PV Power, combining measured PV with the optional uncurtailed power estimate
+- Planning Solar Forecast (configured Energy Dashboard providers and retrieval status)
+- Daily Plan Outcomes (14 local days of charging, targets, interruptions and coverage)
 
 Charge Power can be selected from `200 W` to `1200 W` per unit in `100 W`
 steps. New installations start at `800 W`. Discharge Power remains limited to

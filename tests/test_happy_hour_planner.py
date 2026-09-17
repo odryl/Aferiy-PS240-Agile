@@ -275,7 +275,8 @@ def test_happy_hour_import_is_credited_instead_of_billed() -> None:
     free_slots = [slot for slot in with_happy_hour["slots"] if slot["tariff_phase"] == "free_energy"]
     assert all(slot["charge_cost_gbp"] == 0.0 for slot in free_slots)
     assert all(slot["credited_back_gbp"] > 0 for slot in free_slots)
-    assert all(slot["net_saving_gbp"] > 0 for slot in free_slots)
+    # Credit is disclosed separately; it must not be counted again as net value.
+    assert all(slot["net_saving_gbp"] == 0 for slot in free_slots)
 
 
 def test_cosy_plan_is_unchanged_without_happy_hour_windows() -> None:

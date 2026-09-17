@@ -103,18 +103,14 @@ command is sent; a storage failure inhibits the command.
    through its interlocks, confirmation debounce, and verified command path.
 9. Home Assistant updates the Today/Tomorrow plan sensors and dashboard card.
 
-## Solar forecast follow-up
+## Solar forecast timing
 
-The Agile fallback now subtracts historical measured PV from its half-hour
-demand profile, and the shadow sensor discovers solar forecast config entries
-selected in the Home Assistant Energy Dashboard. It does not yet consume their
-timestamped forecast values. The next provider-neutral stage should consume
-the solar forecast selected in Home Assistant's Energy Dashboard (including
-Forecast.Solar or compatible providers), convert its timestamped Wh forecast to
-the same local half-hour buckets, and fail back to the current demand-only plan
-when the forecast is missing or stale. Forecast energy must be capped by
-expected demand unless an export-price model is added; otherwise surplus PV
-would incorrectly increase the value of battery discharge.
+Configured Energy Dashboard providers now supply timestamped forecast buckets
+for conservative just-in-time charging. Forecasts never reduce SOC targets or
+subtract energy from the demand profile. Grid catch-up reserves the full live
+deficit plus a margin, and Agile waits remain inside their reserved command
+window. See [Solar timing and daily outcomes](SOLAR_AND_OUTCOMES.md) for the
+fallback, observations and validation details.
 
 If there is exactly one Octopus import meter, rate entities are discovered
 automatically. Multi-meter installations must select the two import event
@@ -136,8 +132,7 @@ The initial controller now provides:
 The following remain follow-up improvements rather than permission to weaken
 the existing gates:
 
-- provider-neutral timestamped solar forecast ingestion (live PV inhibition is
-  already enforced)
+- supervised validation of forecast timing and daily outcome tracking
 - per-period Agile demand profiles learned directly from Home Assistant Recorder
 - configurable daily cycle/cost ceilings
 - longer live-command validation across sunny, cloudy, reconnect, midnight,

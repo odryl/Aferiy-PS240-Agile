@@ -1059,7 +1059,10 @@ def _project_cosy_schedule(scheduled: dict[str, Any]) -> dict[str, Any]:
     charge_eff = float(scheduled.get("charge_efficiency", 0.90))
     discharge_eff = float(scheduled.get("discharge_efficiency", 0.95))
     charge_kw = float(scheduled["max_system_charge_power_w"]) / 1000
-    output_kw = float(scheduled["cosy_max_battery_output_w"]) / 1000
+    output_kw = min(
+        float(scheduled["cosy_max_battery_output_w"]),
+        float(scheduled["max_system_discharge_power_w"]),
+    ) / 1000
     ready = datetime.combine(day, time.fromisoformat(scheduled["ready_by"]), tzinfo=zone).astimezone(UTC)
     protected = datetime.combine(day, time.fromisoformat(scheduled["protected_until"]), tzinfo=zone).astimezone(UTC)
     ready_soc = None if now > ready else stored / capacity * 100
@@ -1074,7 +1077,7 @@ def _project_cosy_schedule(scheduled: dict[str, Any]) -> dict[str, Any]:
         and datetime.fromisoformat(s["end"]).astimezone(UTC) > now
     ]
     replacement_rate = sum(future_cheap) / len(future_cheap) if future_cheap else None
-    for slot in scheduled["slots"]:
+    for index, slot in enumerate(scheduled["slots"]):
         start = datetime.fromisoformat(slot["start"]).astimezone(UTC)
         end = datetime.fromisoformat(slot["end"]).astimezone(UTC)
         hours = max(0.0, (end - max(start, now)).total_seconds() / 3600)
@@ -1093,12 +1096,13 @@ def _project_cosy_schedule(scheduled: dict[str, Any]) -> dict[str, Any]:
                     free_energy += energy
                     slot_credit = energy * float(slot["rate_gbp_per_kwh"])
                     free_credit += slot_credit
-                    slot["credited_back_gbp"] = round(slot_credit, 6)
                 else:
                     charge_cost = energy * float(slot["rate_gbp_per_kwh"])
                     cost += charge_cost
-                if end.astimezone(zone).strftime("%H:%M") in ("07:00", "16:00", "00:00"):
+                next_slot = scheduled["slots"][index + 1] if index + 1 < len(scheduled["slots"]) else None
+                if next_slot is None or next_slot["action"] != "charge" or next_slot.get("slot_target_soc") != slot["slot_target_soc"]:
                     shortfall += max(0.0, target - stored)
+                stored_rate = charge_kw * charge_eff
             else:
                 # expected_house_load_kwh is a half-hour net-load estimate, not a power command.
                 demand = max(0.0, float(slot.get("expected_house_load_kwh", output_kw / 2))) * hours / 0.5
@@ -1107,22 +1111,33 @@ def _project_cosy_schedule(scheduled: dict[str, Any]) -> dict[str, Any]:
                 discharged += energy
                 avoided_cost = energy * float(slot["rate_gbp_per_kwh"])
                 avoided += avoided_cost
-            if now <= ready and start < ready <= end:
-                fraction = max(0.0, (ready - max(start, now)).total_seconds()) / (hours * 3600)
-                ready_soc = (before + (stored - before) * min(1.0, fraction)) / capacity * 100
-            if now <= protected and start < protected <= end:
-                fraction = max(0.0, (protected - max(start, now)).total_seconds()) / (hours * 3600)
-                end_soc = (before + (stored - before) * min(1.0, fraction)) / capacity * 100
+                stored_rate = -min(output_kw, demand / hours) / discharge_eff
+
+            for milestone in (ready, protected):
+                if now <= milestone and start < milestone <= end:
+                    elapsed_hours = max(0.0, (milestone - max(start, now)).total_seconds() / 3600)
+                    change = min(abs(stored - before), abs(stored_rate) * elapsed_hours)
+                    milestone_soc = (before + (change if stored_rate >= 0 else -change)) / capacity * 100
+                    if milestone == ready:
+                        ready_soc = milestone_soc
+                    if milestone == protected:
+                        end_soc = milestone_soc
         replacement = energy * replacement_rate / charge_eff / discharge_eff if slot["action"] != "charge" and replacement_rate is not None else 0.0
         slot.update(energy_kwh=round(energy, 6), power_w=round(energy / hours * 1000) if hours else 0,
                     charge_cost_gbp=round(charge_cost, 6), avoided_import_cost_gbp=round(avoided_cost, 6),
                     replacement_cost_gbp=round(replacement, 6),
-                    net_saving_gbp=round(avoided_cost - replacement + slot_credit, 6),
-                    projected_end_soc=round(stored / capacity * 100, 2), actionable_minutes=round(hours * 60, 2))
+                    net_saving_gbp=round(avoided_cost - replacement, 6) if replacement_rate is not None else None,
+                    credited_back_gbp=round(slot_credit, 6),
+                    projected_end_soc=round(stored / capacity * 100, 2) if hours else None,
+                    actionable_minutes=round(hours * 60, 2))
     replacement_cost = discharged * replacement_rate / charge_eff / discharge_eff if replacement_rate is not None else None
     paid_grid = grid - free_energy
     scheduled.update(
-        projection_basis="cosy_fixed_schedule_from_planning_time", estimate_scope="remaining_day",
+        projection_basis="cosy_fixed_schedule_from_planning_time",
+        estimate_scope="remaining_day" if now > datetime.combine(day, time.min, tzinfo=zone).astimezone(UTC) else "full_day",
+        charge_periods=sum(s["action"] == "charge" and s["energy_kwh"] > 0 for s in scheduled["slots"]),
+        discharge_periods=sum(s["action"] == "self_gen" and s["energy_kwh"] > 0 for s in scheduled["slots"]),
+        next_day_rates_used=False,
         projected_soc_at_ready_by=round(ready_soc, 1) if ready_soc is not None else None,
         projected_soc_at_protection_end=round(end_soc, 1) if end_soc is not None else None,
         projected_soc_at_day_end=round(stored / capacity * 100, 1),
@@ -1136,10 +1151,10 @@ def _project_cosy_schedule(scheduled: dict[str, Any]) -> dict[str, Any]:
         average_planned_charge_rate_gbp_per_kwh=cost / paid_grid if paid_grid else None,
         delivered_replacement_cost_gbp_per_kwh=replacement_rate / charge_eff / discharge_eff if replacement_rate is not None else None,
         replacement_rate_source="cosy_remaining_cheap_average", charge_target_shortfall_kwh=round(shortfall, 3),
-        cost_estimate_note="Remaining-day fixed-schedule estimate, not measured savings or a complete bill. Solar deferrals can change grid charging. Net value is avoided import minus replacement energy at the mean remaining cheap rate; charging cost is shown separately. Happy Hour import is counted at the local unit rate as a credited-back estimate, not as a billed cost. Past SOC projections are unavailable.",
+        cost_estimate_note="Fixed-schedule estimate from planning time to midnight, not measured savings or a complete bill. Solar deferrals can change grid charging. Net value is avoided import minus replacement energy at the mean remaining cheap rate; charging cost is shown separately. Happy Hour import is counted at the local unit rate as a credited-back estimate, not as a billed cost. Past SOC projections are unavailable.",
     )
     for period in scheduled["cosy_periods"]:
-        members = [s for s in scheduled["slots"] if period["start"] <= s["start"] < period["end"]]
+        members = [s for s in scheduled["slots"] if datetime.fromisoformat(period["start"]) <= datetime.fromisoformat(s["start"]) < datetime.fromisoformat(period["end"])]
         period["planned_energy_kwh"] = round(sum(s["energy_kwh"] for s in members), 3)
         period["projected_end_soc"] = members[-1]["projected_end_soc"] if members else None
     return scheduled
@@ -1194,6 +1209,63 @@ def cosy_period_action(
     return None
 
 
+def forecast_charge_timing(
+    forecast: Mapping[str, Any] | None,
+    *,
+    now: datetime,
+    deadline: datetime,
+    capacity_kwh: float,
+    target_soc: float,
+    soc: float,
+    power_w: float,
+    efficiency: float,
+) -> dict[str, Any] | None:
+    """Allow a solar wait only when the entire deficit still fits on grid alone."""
+    if not forecast or forecast.get("status") != "available":
+        return None
+    try:
+        retrieved = datetime.fromisoformat(str(forecast["retrieved_at"]))
+        if retrieved.tzinfo is None or not 0 <= (now - retrieved).total_seconds() <= 2700:
+            return None
+        if not all(isfinite(v) for v in (capacity_kwh, target_soc, soc, power_w, efficiency)):
+            return None
+        if capacity_kwh <= 0 or power_w <= 0 or not 0 < efficiency <= 1 or not 0 <= soc < target_soc <= 100:
+            return None
+        if deadline <= now:
+            return None
+        # No forecast energy is subtracted here. Margin covers poll confirmation,
+        # command latency and a small allowance for charging below nominal power.
+        minutes = capacity_kwh * (target_soc - soc) / 100 / (power_w / 1000 * efficiency) * 60
+        margin = max(5.0, minutes * .10)
+        latest = deadline - timedelta(minutes=minutes + margin)
+        solar = 0.0
+        cursor = now.astimezone(UTC)
+        for period in sorted(forecast.get("periods", []), key=lambda p: p["start"]):
+            start = datetime.fromisoformat(period["start"]).astimezone(UTC)
+            end = datetime.fromisoformat(period["end"]).astimezone(UTC)
+            kwh = float(period["kwh"])
+            if not isfinite(kwh) or kwh < 0 or end <= start:
+                return None
+            if end <= cursor or start >= deadline:
+                continue
+            if start > cursor:
+                return None  # Missing coverage is not a sunny-hour prediction.
+            stop = min(end, deadline)
+            solar += kwh * (stop - cursor).total_seconds() / (end - start).total_seconds()
+            cursor = stop
+        if cursor < deadline or solar < .05:
+            return None
+    except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
+        return None
+    return {
+        "forecast_jit": True, "forecast_before_deadline_kwh": round(solar, 3),
+        "forecast_target_credit_kwh": 0.0, "latest_grid_charge_start": latest.isoformat(),
+        "charge_deadline": deadline.isoformat(), "required_charge_minutes": round(minutes, 1),
+        "jit_margin_minutes": round(margin, 1), "forecast_wait_allowed": now < latest,
+        "target_reachable_on_grid": now + timedelta(minutes=minutes) <= deadline,
+    }
+
+
 def build_agile_shadow_decision(
     plan: Mapping[str, Any] | None,
     *,
@@ -1210,6 +1282,7 @@ def build_agile_shadow_decision(
     available_pv_power_w: float | None = None,
     house_demand_power_w: float | None = None,
     available_pv_house_margin_w: float = 50.0,
+    solar_forecast: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Recommend a view-only operating state without sending device commands."""
     base = {
@@ -1327,6 +1400,45 @@ def build_agile_shadow_decision(
             **target_hold_attrs,
             **action_attrs,
         )
+    if action_name == "charge" and soc_percent < reserve_soc:
+        return result(
+            "Planned Charge", "Charge", "Recover the battery reserve before waiting for solar.",
+            **action_attrs,
+        )
+    if action_name == "charge" and action.get("tariff_phase") != "free_energy":
+        # Cosy has a guaranteed contiguous cheap period. Agile may only defer
+        # within this reserved half-hour; do not assume future cheap slots exist.
+        try:
+            deadline = datetime.fromisoformat(str(action.get("period_end") or action["end"]))
+            if not cosy_schedule:
+                # The command guard can end an Agile charge before the half-hour
+                # ends. Preserve that bound when reserving grid catch-up time.
+                deadline = min(deadline, datetime.fromisoformat(str(action["start"]))
+                               + timedelta(minutes=float(action["duration_minutes"])))
+            timing = forecast_charge_timing(
+                solar_forecast, now=now, deadline=deadline,
+                capacity_kwh=float(plan["battery_capacity_kwh"]),
+                target_soc=float(target_soc), soc=float(soc_percent),
+                power_w=min(float(plan["max_system_charge_power_w"]), float(action["command_power_limit_w"])),
+                efficiency=float(plan.get("charge_efficiency", .90)),
+            )
+        except (KeyError, TypeError, ValueError):
+            timing = None
+        if timing is not None:
+            # Once AC charging is underway, finish the target instead of using
+            # charge-induced SOC gains to oscillate back into a forecast wait.
+            timing["forecast_wait_allowed"] = timing["forecast_wait_allowed"] and ac_charge_power_w < 50
+            if timing["forecast_wait_allowed"]:
+                return result(
+                    "Forecast Solar Wait", "Idle",
+                    "Solar is forecast before the charging deadline. Wait while the full target still fits on grid alone.",
+                    charge_inhibited_reason="forecast_wait_with_grid_backup", **timing, **action_attrs,
+                )
+            return result(
+                "Planned Charge", "Charge",
+                "Charge now to protect the target; forecast solar cannot postpone the latest safe start.",
+                **timing, **action_attrs,
+            )
     cosy_daylight_slot = bool(cosy_schedule and action.get("tariff_phase") == "cheap_charge" and 13 <= now.hour < 16)
     if action_name == "charge" and cosy_daylight_slot:
         deadline = now.replace(hour=16, minute=0, second=0, microsecond=0)
@@ -1509,7 +1621,7 @@ def agile_control_mode_for_state(
     """Return the only automated mode permitted for a validated decision state."""
     if state == "Planned Charge" and recommended_mode == "Charge":
         return "Charge"
-    if state in {"Post-solar Hold", "Cosy Cheap Hold", "Cosy Solar Wait"} and recommended_mode == "Idle":
+    if state in {"Post-solar Hold", "Cosy Cheap Hold", "Cosy Solar Wait", "Forecast Solar Wait"} and recommended_mode == "Idle":
         return "Idle"
     if (
         state

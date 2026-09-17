@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -16,6 +17,7 @@ from zoneinfo import ZoneInfo
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    EVENT_HOMEASSISTANT_STOP,
     EVENT_STATE_CHANGED,
     MATCH_ALL,
     PERCENTAGE,
@@ -28,7 +30,9 @@ from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util.dt import utcnow
 
@@ -68,6 +72,8 @@ from .const import (
     OCTOPUS_RATE_PLAN_TARIFF_NAMES,
 )
 from .coordinator import AeccBatteryCoordinator
+from .plan_insights import OutcomeLedger, timestamp
+from .solar_planning import forecast_entries, normalize_forecasts
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -724,6 +730,8 @@ async def async_setup_entry(
     entities.append(AeccAgileProposedPlanSensor(coordinator, config_entry, "next"))
     entities.append(AeccAgileShadowOperatingStateSensor(coordinator, config_entry))
     entities.append(AeccAvailablePvPowerSensor(coordinator, config_entry))
+    entities.append(AeccPlanningSolarForecastSensor(coordinator, config_entry))
+    entities.append(AeccDailyPlanOutcomesSensor(coordinator, config_entry))
 
     entities.append(AeccEstimatedHouseDemandSensor(coordinator, config_entry))
     entities.append(AeccHouseDemandEnergySensor(coordinator, config_entry))
@@ -1354,6 +1362,7 @@ class AeccAgileShadowOperatingStateSensor(
             ),
             house_demand_power_w=house_demand_power_w,
             available_pv_house_margin_w=_AVAILABLE_PV_HOUSE_MARGIN_W,
+            solar_forecast=getattr(self.coordinator, "planning_solar_forecast", None),
         )
         forecast_entries = self._solar_forecast_config_entries()
         decision.update(
@@ -1368,8 +1377,9 @@ class AeccAgileShadowOperatingStateSensor(
                 "connection_stale_after_seconds": round(stale_after, 1),
                 "connection_last_failure_reason": self.coordinator.last_failure_reason,
                 "solar_forecast_config_entries": forecast_entries,
+                "solar_forecast_retrieved_at": getattr(self.coordinator, "planning_solar_forecast", {}).get("retrieved_at"),
                 "solar_forecast_status": (
-                    "configured_provider_hook" if forecast_entries else "historical_net_profile_fallback"
+                    getattr(self.coordinator, "planning_solar_forecast", {}).get("status", "unavailable")
                 ),
                 "live_solar_context": available_pv_context["energy_dashboard_solar"],
                 "available_pv_context": available_pv_context,
@@ -5350,4 +5360,222 @@ class AeccWifiSignalSensor(
             "signal_dbm": rssi,
             "device_role": "Master",
             "note": "Percentage is a user-friendly conversion of the raw Wi-Fi signal.",
+        }
+
+
+class AeccPlanningSolarForecastSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccBatteryCoordinator], SensorEntity):
+    """Read only configured Energy forecast platforms, independently of TCP polling."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Planning Solar Forecast"
+    _attr_icon = "mdi:weather-partly-cloudy"
+
+    def __init__(self, coordinator, config_entry):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{config_entry.entry_id}_planning_solar_forecast"
+        self._refresh_lock = asyncio.Lock()
+
+    @property
+    def device_info(self):
+        return self.coordinator.device_info
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        await self._async_refresh()
+        self.async_on_remove(async_track_time_interval(self.hass, self._async_refresh, timedelta(minutes=15)))
+
+    async def _async_refresh(self, _now=None):
+        if self._refresh_lock.locked():
+            return
+        async with self._refresh_lock:
+            manager = getattr(self.coordinator, "energy_dashboard_manager", None)
+            entries = forecast_entries(getattr(manager, "data", None) or {})
+            context = {"status": "not_configured", "periods": []}
+            if entries:
+                try:
+                    async with asyncio.timeout(10):
+                        from homeassistant.components.energy.websocket_api import async_get_energy_platforms
+
+                        platforms = await async_get_energy_platforms(self.hass)
+                        providers = [self.hass.config_entries.async_get_entry(entry_id) for entry_id in entries]
+                        if len(entries) > 16 or any(
+                            entry is None or entry.domain not in platforms for entry in providers
+                        ):
+                            raise ValueError("A configured forecast provider is unavailable")
+                        values = await asyncio.gather(
+                            *(platforms[entry.domain](self.hass, entry.entry_id) for entry in providers)
+                        )
+                        context = normalize_forecasts(dict(zip(entries, values, strict=True)), utcnow())
+                except Exception:
+                    # A provider must never prevent setup, polling, or grid backup.
+                    _LOGGER.debug("Could not retrieve configured solar forecasts", exc_info=True)
+                    context = {"status": "provider_unavailable", "periods": []}
+            context["configured_provider_count"] = len(entries)
+            self.coordinator.planning_solar_forecast = context
+            self.async_write_ha_state()
+
+    @property
+    def native_value(self):
+        context = getattr(self.coordinator, "planning_solar_forecast", {})
+        retrieved = timestamp(context.get("retrieved_at"))
+        if retrieved is not None and utcnow() - retrieved > timedelta(minutes=45):
+            return "stale"
+        return context.get("status", "unavailable")
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            **getattr(self.coordinator, "planning_solar_forecast", {}),
+            "status": self.native_value,
+            "policy": "Forecasts affect timing only. Grid catch-up assumes zero solar; battery targets are unchanged.",
+            "freshness_note": "Retrieval time is not the provider's forecast issue time.",
+        }
+
+
+class AeccDailyPlanOutcomesSensor(AeccRecorderLeanMixin, CoordinatorEntity[AeccBatteryCoordinator], SensorEntity):
+    """Keep 14 local days of observed outcomes without recording bulky HA attributes."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Daily Plan Outcomes"
+    _attr_icon = "mdi:history"
+
+    def __init__(self, coordinator, config_entry):
+        super().__init__(coordinator)
+        self._entry_id = config_entry.entry_id
+        self._attr_unique_id = f"{self._entry_id}_daily_plan_outcomes"
+        self._ledger = None
+        self._store = None
+        self._storage_status = "starting"
+
+    @property
+    def device_info(self):
+        return self.coordinator.device_info
+
+    async def async_added_to_hass(self):
+        self._store = Store(self.hass, 1, f"{DOMAIN}_{self._entry_id}_daily_plan_outcomes")
+        try:
+            saved = await self._store.async_load()
+            self._storage_status = "ready"
+        except Exception:
+            _LOGGER.warning("Daily plan outcome history could not be loaded", exc_info=True)
+            saved = None
+            self._storage_status = "load_failed"
+        self._ledger = OutcomeLedger(self.hass.config.time_zone, saved if isinstance(saved, dict) else None)
+        await super().async_added_to_hass()
+        self.async_on_remove(async_track_time_interval(self.hass, self._async_save, timedelta(minutes=5)))
+        self.async_on_remove(self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._async_save))
+        self._handle_coordinator_update()
+
+    async def _async_save(self, _event=None):
+        if self._store is None or self._ledger is None:
+            return
+        try:
+            await self._store.async_save(self._ledger.snapshot())
+            self._storage_status = "ready"
+        except Exception:
+            self._storage_status = "save_failed"
+            _LOGGER.warning("Daily plan outcomes could not be saved", exc_info=True)
+        self.async_write_ha_state()
+
+    async def async_will_remove_from_hass(self):
+        await self._async_save()
+        await super().async_will_remove_from_hass()
+
+    def _state(self, suffix):
+        entity_id = er.async_get(self.hass).async_get_entity_id("sensor", DOMAIN, f"{self._entry_id}_{suffix}")
+        return self.hass.states.get(entity_id) if entity_id else None
+
+    @callback
+    def _handle_coordinator_update(self):
+        if self._ledger is None:
+            return
+        now = utcnow()
+        last = self.coordinator.last_successful_update
+        fresh = bool(self.coordinator.last_update_success and last and 0 <= (now - last).total_seconds() <= 90)
+        plan_state = self._state("agile_proposed_plan_current")
+        plan = dict(plan_state.attributes) if plan_state else {}
+        valid_plan = (
+            plan.get("status") in ("proposed", "limited")
+            and plan.get("date") == now.astimezone(ZoneInfo(self.hass.config.time_zone)).date().isoformat()
+        )
+        slots = [dict(slot) for slot in plan.get("slots", [])] if valid_plan else []
+        shadow_state = self._state("agile_shadow_operating_state")
+        shadow = dict(shadow_state.attributes) if shadow_state else {}
+        controller = (
+            self.coordinator.cosy_controller
+            if plan.get("tariff_strategy") == "cosy_fixed_daily_schedule"
+            else self.coordinator.agile_controller
+        )
+        control = controller.extra_state_attributes if controller else {}
+        enabled = bool(controller and controller.is_on)
+        targets = []
+        planned = None
+        if valid_plan:
+            planned = 0.0
+            for slot in slots:
+                start, end = timestamp(slot.get("start")), timestamp(slot.get("end"))
+                if slot.get("action") != "charge" or start is None or end is None or end <= now:
+                    continue
+                # energy_kwh already covers only the time after planning_time.
+                start = max(start, timestamp(plan.get("planning_time")) or start)
+                if end > start:
+                    planned += (
+                        (_as_float(slot.get("energy_kwh"), 0) or 0)
+                        * max(0, (end - max(start, now)).total_seconds())
+                        / (end - start).total_seconds()
+                    )
+            if plan.get("tariff_strategy") == "cosy_fixed_daily_schedule":
+                targets = [
+                    {"at": p["end"], "target_soc": p["slot_target_soc"]}
+                    for p in plan.get("cosy_periods", [])
+                    if p.get("action") == "charge"
+                ]
+            else:
+                deadline = datetime.combine(
+                    date.fromisoformat(plan["date"]),
+                    datetime.fromisoformat(f"{plan['date']}T{plan['ready_by']}").time(),
+                    tzinfo=ZoneInfo(self.hass.config.time_zone),
+                )
+                targets = [{"at": deadline.isoformat(), "target_soc": plan.get("target_soc")}]
+            # Live Daylight Flex can raise the active period target.
+            for target in targets:
+                if target["at"] == shadow.get("planned_period_end") and shadow.get("target_soc") is not None:
+                    target["target_soc"] = shadow["target_soc"]
+        self._ledger.observe(
+            {
+                "at": (last if fresh else now).isoformat(),
+                "fresh": fresh,
+                "charge_w": self.coordinator.get_value("ac_charging_power"),
+                "output_w": self.coordinator.get_value("total_battery_output_power"),
+                "grid_w": self.coordinator.get_value("grid_power"),
+                "soc": self.coordinator.get_value("average_battery_soc"),
+                "rates": slots,
+                "targets": targets,
+                "plan_grid_charge_kwh": planned,
+                "enabled": enabled,
+                "control": control.get("status", "Unavailable"),
+                "mode": control.get("active_mode"),
+                "reason": control.get("reason"),
+                "solar_wait_active": enabled
+                and control.get("status") == "Active"
+                and control.get("active_mode") in ("Idle", "Self-Gen/Zero Export")
+                and shadow_state is not None
+                and shadow_state.state in ("Cosy Solar Wait", "Forecast Solar Wait", "Solar Charge Deferred"),
+            }
+        )
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self):
+        return "tracking" if self.coordinator.last_update_success else "telemetry_gap"
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "days": self._ledger.summary(utcnow()) if self._ledger else [],
+            "storage_status": self._storage_status,
+            "retention_days": 14,
+            "measurement_basis": "power_samples_max_90_second_gap",
+            "grid_allocation_note": "Estimated purchased charging is min(AC charging, positive site grid import). It is an upper-bound allocation when other household loads or external solar are present, not a dedicated battery meter.",
+            "comparison_note": "The first valid remaining-day plan is frozen at capture time. Compare AC since capture with that plan; coverage gaps are not zero consumption. No realised savings are calculated.",
         }

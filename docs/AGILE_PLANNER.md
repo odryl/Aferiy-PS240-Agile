@@ -1,5 +1,8 @@
 # Agile Octopus planner
 
+For forecast timing, grid-backup deadlines and daily history, see
+[Solar timing and daily outcomes](SOLAR_AND_OUTCOMES.md).
+
 Two sensors should appear:
 
 - **Agile Proposed Plan Today**

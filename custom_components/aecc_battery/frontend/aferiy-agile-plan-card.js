@@ -84,7 +84,10 @@ class AferiyAgilePlanCard extends HTMLElement {
     const daylightFlex = isCosy
       ? this._findSwitch(this.config.cosy_daylight_flex_entity, "_cosy_daylight_flex", "Cosy Daylight Flex")
       : null;
+    this._forecast = this._find(this.config.forecast_entity, "_planning_solar_forecast", "Planning Solar Forecast");
+    this._outcomes = this._find(this.config.outcomes_entity, "_daily_plan_outcomes", "Daily Plan Outcomes");
     const signature = JSON.stringify([
+      this._forecast, this._outcomes,
       today?.entity_id,
       today?.state,
       today?.attributes,
@@ -399,7 +402,7 @@ class AferiyAgilePlanCard extends HTMLElement {
       ["Average charge rate", `${this._rate(this._cosyNumber(attrs.average_planned_charge_rate_gbp_per_kwh))}/kWh`],
       ["Delivered replacement rate", `${this._rate(this._cosyNumber(attrs.delivered_replacement_cost_gbp_per_kwh))}/kWh`],
       ["Replacement prices", attrs.replacement_rate_source === "cosy_remaining_cheap_average" ? "Mean remaining Cosy cheap rate" : attrs.replacement_rate_source === "next_day_published_rates" ? "Published tomorrow" : "Same day"],
-      [`Planned discharge to ${attrs.protected_until || "22:00"}`, this._number(this._cosyNumber(attrs.planned_discharge_kwh), " kWh", 2)],
+      ["Planned home supply to midnight", this._number(this._cosyNumber(attrs.planned_discharge_kwh), " kWh", 2)],
       ["Battery capacity", this._number(this._cosyNumber(attrs.battery_capacity_kwh), " kWh", 3)],
       ["Reserve / charge limit", `${this._number(this._cosyNumber(attrs.reserve_soc), "%", 0)} / ${this._number(this._cosyNumber(attrs.charge_limit_soc ?? attrs.target_soc), "%", 0)}`],
       ["AC charge / home supply limit", `${this._number(this._cosyNumber(attrs.max_system_charge_power_w), " W", 0)} / ${this._number(this._cosyNumber(attrs.cosy_max_battery_output_w ?? attrs.max_system_discharge_power_w), " W", 0)}`],
@@ -410,7 +413,6 @@ class AferiyAgilePlanCard extends HTMLElement {
       <p>${this._escape(attrs.schedule_note || "Targets are calculated separately for each cheap period.")}</p>
       ${attrs.starting_soc_source === "conservative_reserve_assumption" ? "<p>Tomorrow assumes the battery starts at reserve; this will refine when it becomes Today.</p>" : ["today_projected_protection_end_soc", "today_projected_day_end_soc"].includes(attrs.starting_soc_source) ? "<p>Tomorrow starts from today's projected ending SOC.</p>" : ""}
       ${(attrs.happy_hour_warnings || []).length ? `<p>${this._escape((attrs.happy_hour_warnings || []).join(" "))}</p>` : ""}
-      ${attrs.economic_plan_reason ? `<p>${this._escape(attrs.economic_plan_reason)}</p>` : ""}
       <p>${this._escape(attrs.cost_estimate_note || "Estimates cover planned battery actions, not your total electricity bill.")}</p>`;
   }
 
@@ -441,23 +443,24 @@ class AferiyAgilePlanCard extends HTMLElement {
       ? decision.target_soc ?? targetPeriod?.slot_target_soc : targetPeriod?.slot_target_soc);
     const auto = control?.state === "on";
     const controllerStatus = control?.attributes?.status || "Waiting";
+    const enableRejected = control?.state === "off" && controllerStatus === "Inhibited";
     const active = auto && controllerStatus === "Active";
     const blocked = (auto && !active) || ["Inhibited", "Restore pending", "Fail-safe"].includes(controllerStatus);
     const mode = active ? control.attributes.active_mode : decision.recommended_operating_mode;
     const labels = { "Charge": "Charging", "Idle": "Holding battery", "Self-Gen/Zero Export": "Supplying home" };
     let headline = labels[mode] || "Waiting for a decision";
     if (mode === "Charge" && Number.isFinite(target)) headline = `Charging to ${target.toFixed(0)}%`;
-    if (shadow?.state === "Cosy Solar Wait" && mode === "Idle") headline = "Waiting for solar";
+    if (["Cosy Solar Wait", "Forecast Solar Wait"].includes(shadow?.state) && mode === "Idle") headline = "Waiting for solar";
     if (shadow?.state === "Solar Charge Deferred" && mode === "Self-Gen/Zero Export") headline = "Making use of solar";
     if (!validToday || !current) headline = "Waiting for valid rates";
     if (!fresh) headline = "Battery data unavailable";
-    if (blocked) headline = `Control ${controllerStatus.toLowerCase()}`;
+    if (blocked) headline = enableRejected ? "Couldn’t enable automatic control" : `Control ${controllerStatus.toLowerCase()}`;
     const reason = blocked ? control.attributes.reason : !fresh ? "Waiting for fresh battery telemetry."
       : !validToday || !current ? live.reason || "A validated current-day plan is unavailable."
       : active ? control.attributes.reason || decision.reason : decision.reason;
     const latestStart = Date.parse(decision.latest_grid_charge_start);
     const margin = Number.isFinite(latestStart) ? Math.max(0, Math.ceil((latestStart - now) / 60000)) : NaN;
-    const solarWait = fresh && current && validToday && !blocked && shadow?.state === "Cosy Solar Wait";
+    const solarWait = fresh && current && validToday && !blocked && ["Cosy Solar Wait", "Forecast Solar Wait"].includes(shadow?.state);
     const earlier = isToday ? periods.filter(period => Date.parse(period.end) <= now) : [];
     const remaining = isToday ? periods.filter(period => Date.parse(period.end) > now) : periods;
     const shortfalls = remaining.filter(period => Number(period.cover_shortfall_kwh) > 0);
@@ -467,8 +470,8 @@ class AferiyAgilePlanCard extends HTMLElement {
     this._root.innerHTML = `<ha-card class="co-card">
       <style>${this._cosyStyles()}</style>
       <header class="co-header"><div class="co-title"><ha-icon icon="mdi:battery-charging-outline"></ha-icon><div><h2>${this._escape(title)}</h2><div class="co-muted co-small">Battery plan · AFERIY</div></div></div>
-        <span class="co-badge ${active ? "co-success" : "co-muted"}">${auto ? `● Auto · ${this._escape(controllerStatus)}` : control?.state === "off" ? "○ Plan only" : "Control unavailable"}</span></header>
-      <section class="co-hero" aria-live="polite"><div class="co-kicker">${active ? "NOW" : auto ? "CONTROLLER" : "PROPOSED · CONTROL OFF"}${current ? ` · ${this._escape(current.cosy_rate_band)} RATE` : ""}</div>
+        <span class="co-badge ${active ? "co-success" : "co-muted"}">${auto ? `● Auto · ${this._escape(controllerStatus)}` : control?.state === "off" ? (enableRejected ? "○ Couldn’t enable" : "○ Plan only") : "Control unavailable"}</span></header>
+      <section class="co-hero" aria-live="polite"><div class="co-kicker">${active ? "NOW" : auto || blocked ? "CONTROLLER" : "PROPOSED · CONTROL OFF"}${current ? ` · ${this._escape(current.cosy_rate_band)} RATE` : ""}</div>
         <h3>${this._escape(headline)}</h3><div class="co-muted co-reason">${this._escape(reason || "Waiting for a controller decision.")}</div>
         ${!auto ? '<p class="co-small">Automatic control is off. This plan is advisory.</p>' : ""}
         <div class="co-hero-foot"><span>${solarWait && Number.isFinite(margin) ? `Grid charge in <strong>${margin} min</strong>, if needed` : `Mode: ${this._escape(mode || "Unavailable")}`}</span><span>${current ? `${this._cosyPeriodPrice(current)} until ${this._escape(current.local_end)}` : "Rate unavailable"}</span></div></section>
@@ -489,8 +492,9 @@ class AferiyAgilePlanCard extends HTMLElement {
           <div class="co-metrics"><div><span class="co-muted co-small">Estimated net value${attrs.estimate_scope === "remaining_day" ? " · remaining" : ""}</span><strong>${this._money(validDay ? this._cosyNumber(attrs.estimated_net_saving_gbp) : NaN)}</strong></div><div><span class="co-muted co-small">Planned grid charge</span><strong>${this._number(validDay ? this._cosyNumber(attrs.planned_grid_charge_kwh) : NaN, " kWh", 2)}</strong></div></div>
           ${validDay ? `<details data-timeline="cosy-details-${isToday ? "today" : "tomorrow"}"><summary data-focus="details">Cost breakdown &amp; plan details</summary><div class="co-detail">${this._cosyDetails(attrs, availablePv)}</div></details>` : ""}
         </div></section>
+      ${this._planningContext(shadow)}
       <footer class="co-footer co-muted co-small"><span>${fresh ? `Battery updated ${this._cosyTime(decision.connection_last_successful_update)}` : "Battery update unavailable"} · ${validDay ? "Rates validated" : "Rates unavailable"}</span></footer>
-      <details class="co-controls" data-timeline="cosy-controls"><summary data-focus="controls"><ha-icon icon="mdi:tune-variant"></ha-icon> Controls</summary><div class="co-control-content">${this._cosySwitch(control, "Automatic control · beta", "auto")}${this._cosySwitch(daylightFlex, "Daylight Flex · 13:00–16:00", "flex")}<p class="co-muted co-small">Automatic control switches off after a restart. Daylight Flex waits for solar while enough cheap-rate charging time remains.</p><p class="co-error" role="alert">${this._escape(this._controlError || "")}</p></div></details>
+      <details class="co-controls" data-timeline="cosy-controls"><summary data-focus="controls"><ha-icon icon="mdi:tune-variant"></ha-icon> Controls</summary><div class="co-control-content">${this._cosySwitch(control, "Automatic control · beta", "auto")}${this._cosySwitch(daylightFlex, "Daylight Flex · 13:00–16:00", "flex")}<p class="co-muted co-small">Automatic control switches off after a restart. Configured forecasts can enable safe solar waits. Daylight Flex also permits afternoon waiting without a forecast, while grid catch-up time remains.</p><p class="co-error" role="alert">${this._escape(this._controlError || "")}</p></div></details>
     </ha-card>`;
     this._bindTimelines();
     this._root.querySelectorAll("[data-day]").forEach(button => {
@@ -508,6 +512,63 @@ class AferiyAgilePlanCard extends HTMLElement {
       button.addEventListener("click", () => this._toggleCosySwitch(button.dataset.switch));
     });
     if (focusKey) this._root.querySelector(`[data-focus="${focusKey}"]`)?.focus();
+  }
+
+  _planningContext(shadow) {
+    const forecast = this._forecast?.attributes || {};
+    const retrieved = Date.parse(forecast.retrieved_at);
+    const fresh = this._forecast?.state === "available" && Number.isFinite(retrieved)
+      && Date.now() >= retrieved && Date.now() - retrieved <= 45 * 60000;
+    const decision = shadow?.attributes || {};
+    const decisionAge = Date.now() - Date.parse(decision.connection_last_successful_update);
+    const decisionFresh = Number.isFinite(decisionAge) && decisionAge >= 0
+      && decisionAge <= Number(decision.connection_stale_after_seconds) * 1000;
+    const periods = fresh && Array.isArray(forecast.periods) ? forecast.periods : [];
+    const future = periods.filter(p => Date.parse(p.end) > Date.now() && Number(p.kwh) > 0);
+    const dateTime = value => {
+      if (!value) return "Unavailable";
+      const d = new Date(value);
+      return Number.isFinite(d.getTime()) ? new Intl.DateTimeFormat("en-GB", {
+        timeZone: this._hass.config.time_zone, day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+      }).format(d) : "Unavailable";
+    };
+    const reason = fresh ? (future.length ? `Next forecast solar: ${dateTime(future[0].start)} · ${this._number(future[0].kwh, " kWh", 2)} in that hour`
+      : "No upcoming solar energy in the retrieved forecast.")
+      : this._forecast?.state === "not_configured" ? "Select a solar forecast provider in Home Assistant’s Energy Dashboard."
+      : "Forecast unavailable or stale; the usual charging plan remains in force.";
+    const days = Array.isArray(this._outcomes?.attributes?.days) ? this._outcomes.attributes.days.slice(0, 7) : [];
+    const storage = this._outcomes?.attributes?.storage_status;
+    return `<section class="plan-context"><style>
+      .plan-context { margin:16px; font-size:13px; line-height:1.5; }
+      .plan-context p { margin:8px 0; } .plan-context summary { cursor:pointer; font-weight:600; }
+      .plan-context details { padding:8px 0; border-top:1px solid var(--divider-color); }
+      .plan-context .outcome-metrics { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:8px 0; }
+      .plan-context .outcome-note { color:var(--secondary-text-color); font-size:12px; }
+      .plan-context ul { padding-left:20px; } .plan-context li { margin:5px 0; }
+      </style><strong>Solar outlook · targets come first</strong><p>${this._escape(reason)}</p>
+      ${fresh ? `<p class="outcome-note">Retrieved ${this._escape(dateTime(forecast.retrieved_at))}. Provider issue time may differ.</p>` : ""}
+      ${fresh && decisionFresh && decision.forecast_jit ? `<p>Grid backup by <strong>${this._escape(dateTime(decision.latest_grid_charge_start))}</strong> for the ${this._escape(dateTime(decision.charge_deadline))} target.${decision.target_reachable_on_grid === false ? " Available grid time is already insufficient; charging is needed now." : ""}</p>` : ""}
+      <details data-timeline="forecast-explanation"><summary>How solar changes charging</summary>
+        <p>Forecasts can delay paid charging to leave space for solar. They never lower your target. The latest safe start reserves enough time for the entire battery shortfall on grid alone, plus a safety margin. Real solar may reduce that shortfall as it arrives.</p>
+        <p>Cosy uses the end of the current cheap period. Agile only waits within a reserved charging half-hour, preserving its chosen prices. Booked free-power periods keep their charging priority. Missing forecasts use the existing plan and Daylight Flex setting.</p>
+        <p>Energy and cost projections remain a zero-forecast baseline; actual solar and interruptions can change the outcome.</p>
+      </details>
+      <details data-timeline="daily-outcomes"><summary>What happened · daily history</summary>
+        <p class="outcome-note">${this._escape(this._outcomes?.attributes?.comparison_note || "History starts after the updated integration is installed. Missing observations are not zero use.")}</p>
+        ${this._outcomes && ["unavailable", "unknown", "telemetry_gap"].includes(this._outcomes.state) ? '<p>History has a telemetry gap; values below are partial observations.</p>' : ""}
+        ${storage && storage !== "ready" ? `<p role="alert">History storage: ${this._escape(storage)}. Recent observations may not survive a restart.</p>` : ""}
+        ${days.length ? days.map(day => `<details data-timeline="outcome-${this._escape(day.date)}"><summary>${this._escape(day.date)} · ${Number(day.observed_seconds) > 0 ? this._number(day.ac_charge_kwh, " kWh AC", 2) : "No observations"} · ${this._number(day.coverage_percent, "% coverage", 0)}</summary>
+          <div class="outcome-metrics"><span>Estimated purchased charging<br><strong>${Number(day.grid_observed_seconds) > 0 ? this._number(day.grid_charge_kwh, " kWh", 2) : "Unavailable"}</strong></span>
+          <span>Priced charging estimate<br><strong>${Number(day.grid_observed_seconds) > 0 && Math.abs(Number(day.priced_charge_kwh) - Number(day.grid_charge_kwh)) < .0001 ? this._money(day.charge_cost_gbp) : "Incomplete pricing"}</strong></span>
+          ${Number(day.happy_hour_credit_gbp) > 0 ? `<span>Happy Hour credit estimate<br><strong>${this._money(day.happy_hour_credit_gbp)}</strong></span>` : ""}
+          <span>Solar waits while active<br><strong>${this._number(day.solar_wait_minutes, " min", 1)}</strong></span><span>Interruptions / inhibitions<br><strong>${this._number(day.interruptions, "", 0)}</strong></span></div>
+          <p class="outcome-note">Last observation: ${this._escape(dateTime(day.last_observed_at))}</p>
+          <p>Plan captured ${this._escape(dateTime(day.plan_captured_at))}: ${this._number(day.plan_grid_charge_kwh, " kWh", 2)} remaining. Observed AC since capture: ${day.plan_captured_at ? this._number(day.ac_since_plan_kwh, " kWh", 2) : "Unavailable"}.</p>
+          <ul>${(day.targets || []).map(t => `<li>${this._escape(dateTime(t.at))}: target ${this._number(t.target_soc, "%", 0)} · ${this._escape(t.result)}${t.observed_soc != null ? ` (${this._number(t.observed_soc, "% observed", 0)})` : ""}${t.automation_on === false ? " · automation off" : ""}</li>`).join("")}</ul>
+          ${(day.events || []).length ? `<p>Recent controller changes</p><ul>${day.events.slice(-3).map(e => `<li>${this._escape(dateTime(e.at))} · ${this._escape(e.state)}: ${this._escape(e.reason)}</li>`).join("")}</ul>` : ""}
+        </details>`).join("") : "<p>No daily observations yet.</p>"}
+        <p class="outcome-note">${this._escape(this._outcomes?.attributes?.grid_allocation_note || "AC charging can include external solar. Purchased energy requires site grid telemetry.")} Costs use known tariff rates and booked Happy Hour credits; they are not a bill. No realised savings are claimed. Up to 14 days are retained locally; the latest seven appear here.</p>
+      </details></section>`;
   }
 
   _cosySwitch(entity, label, key) {
@@ -643,6 +704,7 @@ class AferiyAgilePlanCard extends HTMLElement {
       ${daylightFlex ? `<div class="shadow-state"><strong>Cosy Daylight Flex: ${this._escape(daylightFlex.state)}</strong><span>13:00–16:00 PV-first Idle · 1,200 W AC only from the latest safe start${Number.isFinite(Number(shadow?.attributes?.daylight_flex_margin_minutes)) ? ` · ${this._number(shadow.attributes.daylight_flex_margin_minutes, " min", 1)} until forced charge` : ""}</span></div>` : ""}
       ${availablePv ? `<div class="shadow-state"><strong>Available PV power: ${this._number(availablePv.state, " W", 0)}</strong><span>${this._escape(availablePv.attributes?.source === "configured_available_pv_estimate" ? "Using the configured uncurtailed PV estimate" : "Using measured live PV")}${availablePv.attributes?.configured_estimate_status && availablePv.attributes.configured_estimate_status !== "not_configured" ? ` · estimate ${this._escape(availablePv.attributes.configured_estimate_status)}` : ""}</span></div>` : ""}
       ${shadow ? `<div class="shadow-state"><strong>${this._escape(tariffName)} operating state: ${this._escape(shadow.state)}</strong><span>${control?.state === "on" ? "Using" : "Would use"} ${this._escape(shadow.attributes?.recommended_operating_mode || "Self-Gen/Zero Export")} · ${this._escape(shadow.attributes?.reason || "Waiting for a decision")}</span></div>` : ""}
+      ${this._planningContext(shadow)}
       ${this._day(today, "Today")}
       ${this._day(tomorrow, "Tomorrow")}
     </ha-card>`;

@@ -42,8 +42,8 @@ The Agile planner currently assumes:
 - Useful live PV inhibits planned grid charging. Grid charging is also
   inhibited once the target SOC has been reached.
 - The fallback demand profile is based on anonymised half-hour net-demand
-  medians. Timestamped PV forecast energy is discovered but is not yet consumed
-  by the Agile optimiser.
+  medians. Configured Energy Dashboard forecasts can influence charging timing
+  while full grid-only catch-up time is reserved; they never reduce targets.
 
 These values are safety and planning limits, not a claim that every manual
 operating mode is safe at the same power. Other high-power/manual controls
@@ -454,8 +454,8 @@ patch release for the fix so installed versions remain traceable.
 
 ## Known follow-up work
 
-- Consume provider-neutral, timestamped solar forecasts selected in the Home
-  Assistant Energy Dashboard.
+- Supervise the forecast timing and daily history additions described in
+  `docs/SOLAR_AND_OUTCOMES.md`.
 - Learn per-period demand directly from Home Assistant Recorder while retaining
   privacy and conservative fallback behaviour.
 - Add configurable daily cycle and cost ceilings.

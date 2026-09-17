@@ -1,5 +1,8 @@
 # Cosy Octopus planner
 
+For forecast timing, grid-backup deadlines and daily history, see
+[Solar timing and daily outcomes](SOLAR_AND_OUTCOMES.md).
+
 The Cosy planner turns a Cosy Octopus import tariff and an AFERIY PS240 into a
 fixed, predictable daily routine. It is the flagship feature of this fork: the
 whole day is published as seven meaningful tariff and operating periods, and the
@@ -30,6 +33,26 @@ the next cheap window. If live SOC already meets that target, the controller
 uses Idle rather than purchasing unnecessary energy. Targets are capped at
 the configured Charge Limit, and the plan reports any energy the installed
 battery capacity and permitted SOC range cannot cover.
+
+## Schedule estimates
+
+Costs, energy, and SOC are projected through the displayed fixed schedule from
+its planning time to midnight. Elapsed periods contribute no estimated energy;
+past SOC values are unavailable. A partial current period uses only its remaining
+time, and charging stops at that period's target. Tomorrow starts from today's
+projected midnight SOC when today's valid plan is available.
+
+The projected household supply uses the existing demand profile and is bounded
+by the battery output limit and reserve. Targets still use the conservative
+maximum-output assumption described above. These are schedule estimates: live
+solar, Daylight Flex, household demand, and controller interruptions can change
+the result.
+
+Estimated net value means avoided household import minus the cost of replacing
+that supplied energy, using the mean remaining paid cheap rate and charge/discharge
+losses. Charging cost is shown separately. Happy Hour credit is disclosed
+separately and is not added again to net value. These figures are neither measured
+savings nor a household bill.
 
 ## Set it up
 
@@ -109,7 +132,12 @@ The external helper checkboxes are reminders for installers. They do not install
 ## Automated control
 
 The **Cosy Automated Control** switch is a separate explicit opt-in. While it is
-Off the planner is advisory only. See
+Off the planner is advisory only. If activation is rejected, the card shows
+**Couldn’t enable automatic control** and the controller's reason, even though
+the switch remains Off. For example, select **Self-Gen/Zero Export** first when
+the controller reports an incompatible manual operating mode, then retry.
+
+See
 [Guarded automated control](../README.md#guarded-automated-control) for the
 gating, verification, and fail-safe behaviour shared with Agile.
 

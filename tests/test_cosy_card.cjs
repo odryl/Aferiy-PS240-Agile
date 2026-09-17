@@ -146,3 +146,78 @@ test('no Happy Hours still shows the plain Cosy tariff bands',()=>{
 });
 
 module.exports={fixture};
+
+test('rejected activation stays visible while Off, even with stale data or invalid rates',()=>{
+  const f=fixture();
+  f.control.state='off';f.control.attributes.status='Inhibited';
+  f.control.attributes.reason='Operating Mode is Charge; select Self-Gen/Zero Export before enabling automated control.';
+  f.card.hass=f.hass;
+  assert.match(f.html(),/Couldn’t enable automatic control/);
+  assert.match(f.html(),/select Self-Gen\/Zero Export before enabling/);
+  assert.doesNotMatch(f.html(),/35 min|○ Plan only/);
+  f.shadow.attributes.connection_last_successful_update='2026-09-16T10:00:00Z';
+  f.today.attributes.status='waiting_for_rates';f.card.hass=f.hass;
+  assert.match(f.html(),/Couldn’t enable automatic control/);
+  assert.match(f.html(),/select Self-Gen\/Zero Export before enabling/);
+  f.control.attributes.reason='The restart marker <unavailable>';f.card.hass=f.hass;
+  assert.match(f.html(),/The restart marker &lt;unavailable&gt;/);
+  // A later successful activation clears the failed-attempt presentation.
+  f.control.state='on';f.control.attributes.status='Active';f.control.attributes.reason='Executing Idle';
+  f.card.hass=f.hass;assert.doesNotMatch(f.html(),/Couldn’t enable/);
+  assert.equal(f.calls.length,0);
+});
+
+test('Cosy detail labels use the full schedule and hide obsolete economic warnings',()=>{
+  const f=fixture();f.today.attributes.economic_plan_reason='Old economic target warning';
+  const details=f.card._cosyDetails(f.today.attributes,null);
+  assert.match(details,/Planned home supply to midnight/);
+  assert.doesNotMatch(details,/Old economic target warning|Planned discharge to/);
+});
+
+test('forecast context explains timing-only policy and updates when forecasts change',()=>{
+  const f=fixture();
+  f.hass.states['sensor.test_planning_solar_forecast']={entity_id:'sensor.test_planning_solar_forecast',state:'available',attributes:{
+    retrieved_at:new Date(now).toISOString(),periods:[{start:'2026-09-16T14:00:00Z',end:'2026-09-16T15:00:00Z',kwh:1.2}],
+  }};
+  f.shadow.state='Forecast Solar Wait';f.shadow.attributes.forecast_jit=true;
+  f.shadow.attributes.charge_deadline='2026-09-16T15:00:00Z';
+  f.card.hass=f.hass;
+  assert.match(f.html(),/Solar outlook · targets come first/);
+  assert.match(f.html(),/1.20 kWh/);
+  assert.match(f.html(),/They never lower your target/);
+  assert.match(f.html(),/Grid backup by/);
+  assert.match(f.html(),/Waiting for solar/);
+  f.hass.states['sensor.test_planning_solar_forecast'].state='stale';f.card.hass=f.hass;
+  assert.match(f.html(),/Forecast unavailable or stale/);
+  assert.doesNotMatch(f.html(),/1.20 kWh/);
+});
+
+test('daily outcomes keep observations, frozen plans, unknown targets and gaps distinct',()=>{
+  const f=fixture();
+  f.hass.states['sensor.test_daily_plan_outcomes']={entity_id:'sensor.test_daily_plan_outcomes',state:'tracking',attributes:{storage_status:'save_failed',days:[{
+    date:'2026-09-16',ac_charge_kwh:.8,grid_charge_kwh:.5,priced_charge_kwh:.2,grid_observed_seconds:900,observed_seconds:900,
+    coverage_percent:25,charge_cost_gbp:.02,solar_wait_minutes:30,interruptions:2,
+    plan_captured_at:'2026-09-16T12:00:00Z',plan_grid_charge_kwh:1.8,ac_since_plan_kwh:.8,
+    targets:[{at:'2026-09-16T13:00:00Z',target_soc:80,result:'unknown'}],
+    events:[{at:'2026-09-16T12:00:00Z',state:'Inhibited',reason:'Select <Self-Gen> first'}],
+  }]}};
+  f.card.hass=f.hass;
+  assert.match(f.html(),/25% coverage/);assert.match(f.html(),/1.80 kWh remaining/);
+  assert.match(f.html(),/Incomplete pricing/);assert.match(f.html(),/unknown/);
+  assert.match(f.html(),/History storage: save_failed/);
+  assert.match(f.html(),/Select &lt;Self-Gen&gt; first/);
+  assert.doesNotMatch(f.html(),/<Self-Gen>/);
+  assert.match(f.html(),/No realised savings are claimed/);
+  // Entity updates are not hidden behind the plan's render cache.
+  f.hass.states['sensor.test_daily_plan_outcomes'].attributes.days[0].coverage_percent=30;
+  f.card.hass=f.hass;assert.match(f.html(),/30% coverage/);
+});
+
+test('forecast and history stay available on Agile and do not select another battery',()=>{
+  const f=fixture();f.today.attributes.tariff_name='Octopus Agile';f.tomorrow.attributes.tariff_name='Octopus Agile';
+  f.hass.states['sensor.other_daily_plan_outcomes']={entity_id:'sensor.other_daily_plan_outcomes',state:'tracking',attributes:{days:[{date:'PRIVATE OTHER BATTERY'}]}};
+  f.card.hass=f.hass;
+  assert.match(f.html(),/How solar changes charging/);assert.match(f.html(),/What happened · daily history/);
+  assert.doesNotMatch(f.html(),/PRIVATE OTHER BATTERY/);
+  assert.equal(f.calls.length,0);
+});

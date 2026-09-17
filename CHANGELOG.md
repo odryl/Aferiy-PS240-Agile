@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.8.33
+
+- Consume Energy Dashboard solar forecasts for just-in-time charging with grid-only
+  catch-up deadlines. Forecasts never lower SOC targets; reserve recovery and
+  charging already underway take priority over waiting.
+- Retain 14 local days of observed charging, frozen plan comparisons, target
+  outcomes, active solar waits, interruptions and telemetry coverage. Add solar
+  policy and daily-history explanations to both Agile and Cosy card layouts.
+
+- Reconcile Cosy schedule energy, cost, period counts, and SOC projections;
+  show elapsed SOC as unavailable and account for reaching targets inside a
+  half-hour. Keep Happy Hour credits separate from estimated net value.
+- Clearly identify rejected automation activation while the switch stays Off,
+  preserving the controller’s actionable reason even with stale telemetry.
+- Add fixed-schedule regression coverage for partial periods, reserve and target
+  limits, midnight, daylight-saving days, and card activation feedback.
+
 ## 1.8.32
 
 - Remove the inherited Buy Me a Coffee funding link so the repository no longer
