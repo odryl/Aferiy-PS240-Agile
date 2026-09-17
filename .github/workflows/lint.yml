@@ -25,4 +25,5 @@ jobs:
       - name: Check dashboard syntax and behavior
         run: |
           node --check custom_components/aecc_battery/frontend/aferiy-agile-plan-card.js
-          node --test tests/test_cosy_card.cjs
+          node --check custom_components/aecc_battery/frontend/aferiy-wifi-recovery-card.js
+          node --test tests/test_cosy_card.cjs tests/test_wifi_recovery_card.cjs

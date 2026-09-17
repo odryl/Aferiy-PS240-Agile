@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="en-GB" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AFERIY Wi-Fi loss recovery · card redesign mockup</title>
+<style>
+/* ============================================================================
+   MOCKUP PAGE SHELL — not part of the card.
+   The variables below reproduce the dark Home Assistant theme the current cards
+   were captured in (see docs/images/card.png): accent #4498c3, success #5d9e52.
+   ========================================================================== */
+:root{
+  --primary-color:#4498c3;
+  --success-color:#5d9e52;
+  --warning-color:#d9a441;
+  --error-color:#db5365;
+  --card-background-color:#1c1c1c;
+  --ha-card-background:#1c1c1c;
+  --secondary-background-color:#282828;
+  --primary-text-color:#e1e1e1;
+  --secondary-text-color:#9b9b9b;
+  --divider-color:#3a3a3a;
+  --text-primary-color:#ffffff;
+  --ha-card-border-radius:20px;
+  --page-bg:#0f0f0f; --page-fg:#e1e1e1; --page-muted:#9b9b9b;
+  --page-panel:#161616; --page-line:#2b2b2b;
+  color-scheme:dark;
+}
+html[data-theme=light]{
+  --card-background-color:#ffffff; --ha-card-background:#ffffff;
+  --secondary-background-color:#f1f3f5; --primary-text-color:#1c1c1c;
+  --secondary-text-color:#6b7480; --divider-color:#e1e5e9;
+  --primary-color:#2f7fa8; --success-color:#2f7d3a; --warning-color:#9a6400; --error-color:#c0392b;
+  --text-primary-color:#ffffff;
+  --page-bg:#eceff3; --page-fg:#1c1c1c; --page-muted:#5d6874;
+  --page-panel:#ffffff; --page-line:#dce2e8;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page-bg);color:var(--page-fg);
+  font-family:Roboto,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.page{max-width:1780px;margin:0 auto;padding:34px 26px 90px}
+.page-head{display:flex;gap:28px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;margin-bottom:34px}
+.eyebrow{margin:0;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--primary-color);font-weight:600}
+.page-head h1{margin:8px 0 10px;font-size:30px;font-weight:500;letter-spacing:-.6px}
+.lede{margin:0;max-width:74ch;color:var(--page-muted);font-size:14px;line-height:1.6}
+.lede b{color:var(--page-fg);font-weight:500}
+.theme-toggle{display:flex;gap:4px;padding:4px;border:1px solid var(--page-line);border-radius:12px;background:var(--page-panel)}
+.theme-toggle button{font:inherit;font-size:13px;padding:8px 14px;border:0;border-radius:9px;background:transparent;color:var(--page-muted);cursor:pointer}
+.theme-toggle button[aria-pressed=true]{background:var(--secondary-background-color);color:var(--page-fg);font-weight:500}
+.sec{margin-top:46px}
+.sec-head{display:flex;gap:14px;align-items:baseline;justify-content:space-between;flex-wrap:wrap;
+  border-bottom:1px solid var(--page-line);padding-bottom:10px;margin-bottom:22px}
+.sec-head h2{margin:0;font-size:17px;font-weight:500}
+.sec-head p{margin:0;font-size:13px;color:var(--page-muted)}
+.gallery{display:grid;gap:30px 22px;grid-template-columns:repeat(auto-fill,minmax(356px,1fr))}
+.frame{margin:0;min-width:0}
+.frame figcaption{display:flex;gap:8px;align-items:baseline;justify-content:space-between;margin-bottom:10px;padding:0 4px}
+.frame figcaption b{font-size:13px;font-weight:500}
+.frame figcaption span{font-size:11px;color:var(--page-muted);font-variant-numeric:tabular-nums;text-align:right}
+.slot{max-width:430px}
+.gallery.narrow{grid-template-columns:repeat(auto-fill,368px);justify-content:start}
+.gallery.narrow .slot{max-width:360px}
+.compare{display:grid;gap:26px;grid-template-columns:repeat(auto-fit,minmax(340px,430px));justify-content:start;align-items:start}
+.note-panel{margin-top:26px;background:var(--page-panel);border:1px solid var(--page-line);border-radius:16px;padding:20px 22px}
+.note-panel h3{margin:0 0 12px;font-size:14px;font-weight:500}
+.note-panel table{border-collapse:collapse;width:100%;font-size:13px}
+.note-panel th,.note-panel td{text-align:left;padding:7px 10px 7px 0;vertical-align:top;border-bottom:1px solid var(--page-line)}
+.note-panel th{font-weight:500;color:var(--page-muted);width:32%}
+.note-panel tr:last-child td,.note-panel tr:last-child th{border-bottom:0}
+.note-panel td b{font-weight:500;color:var(--primary-color)}
+
+/* ============================================================================
+   THE CARD — exact CSS to be injected into the card's shadow root.
+   Every selector is scoped to .wr-card so this mockup can show many at once.
+   ========================================================================== */
+.wr-card{
+  --wr-tone:var(--primary-color,#4498c3);
+  display:block;position:relative;padding:0;overflow:hidden;
+  background:var(--ha-card-background,var(--card-background-color,#1c1c1c));
+  color:var(--primary-text-color,#e1e1e1);
+  border-radius:var(--ha-card-border-radius,20px);
+  box-shadow:var(--ha-card-box-shadow,0 2px 8px rgba(0,0,0,.28));
+  font-size:14px;line-height:1.45;container-type:inline-size;
+}
+.wr-card[data-tone=success]{--wr-tone:var(--success-color,#5d9e52)}
+.wr-card[data-tone=warning]{--wr-tone:var(--warning-color,#d9a441)}
+.wr-card[data-tone=error]{--wr-tone:var(--error-color,#db5365)}
+.wr-card[data-tone=idle]{--wr-tone:var(--secondary-text-color,#9b9b9b)}
+.wr-card[data-tone=info]{--wr-tone:var(--primary-color,#4498c3)}
+.wr-card h2,.wr-card h3,.wr-card p{margin:0}
+.wr-card b,.wr-card strong{font-weight:500}
+.wr-card button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.wr-card button:disabled{cursor:default;opacity:.5}
+.wr-card button:focus-visible,.wr-card summary:focus-visible{outline:2px solid var(--wr-tone);outline-offset:2px}
+.wr-svg{width:22px;height:22px;display:block}
+.wr-muted{color:var(--secondary-text-color,#9b9b9b)}
+.wr-small{font-size:12px}
+.wr-card ha-icon{--mdc-icon-size:22px}
+
+.wr-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:22px 24px 17px}
+.wr-title{display:flex;align-items:center;gap:12px;min-width:0}
+.wr-tile{display:grid;place-items:center;flex:none;width:42px;height:42px;border-radius:14px;color:var(--wr-tone);
+  background:color-mix(in srgb,var(--wr-tone) 14%,var(--ha-card-background,var(--card-background-color,#1c1c1c)))}
+.wr-tile .wr-svg{width:22px;height:22px}
+.wr-card h2{font-size:19px;font-weight:500;overflow-wrap:anywhere}
+.wr-sub{font-size:12px;margin-top:2px}
+.wr-badge{flex:none;font-size:12px;color:var(--wr-tone);text-align:right;white-space:nowrap}
+
+.wr-hero{margin:0 24px;padding:18px;border-radius:15px;
+  background:color-mix(in srgb,var(--wr-tone) 9%,var(--ha-card-background,var(--card-background-color,#1c1c1c)))}
+.wr-kicker{color:var(--wr-tone);font-size:11px;font-weight:500;letter-spacing:1px;text-transform:uppercase}
+.wr-card h3{font-size:23px;font-weight:500;letter-spacing:-.5px;margin:6px 0 4px}
+.wr-reason{font-size:13px;overflow-wrap:anywhere}
+.wr-hint{margin-top:11px;padding:9px 11px;border-radius:9px;font-size:12px;overflow-wrap:anywhere;
+  border-left:3px solid var(--wr-tone);background:color-mix(in srgb,var(--wr-tone) 12%,transparent)}
+.wr-foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px 14px;font-size:12px;
+  border-top:1px solid var(--divider-color,#3a3a3a);margin-top:14px;padding-top:12px}
+.wr-foot span{white-space:nowrap}
+
+.wr-sec{border-top:1px solid var(--divider-color,#3a3a3a)}
+.wr-rail-wrap{padding:17px 24px 15px}
+.wr-rail{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:0;padding:0;list-style:none}
+.wr-step{position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center}
+.wr-step::before{content:"";position:absolute;top:6px;left:-50%;width:100%;height:2px;border-radius:2px;background:var(--divider-color,#3a3a3a)}
+.wr-step:first-child::before{display:none}
+.wr-step[data-state=done]::before,.wr-step[data-state=now]::before{background:color-mix(in srgb,var(--wr-tone) 60%,transparent)}
+.wr-dot{position:relative;z-index:1;width:12px;height:12px;border-radius:50%;background:var(--secondary-background-color,#282828);
+  border:2px solid var(--divider-color,#3a3a3a)}
+.wr-step[data-state=done] .wr-dot{background:color-mix(in srgb,var(--wr-tone) 60%,transparent);border-color:transparent}
+.wr-step[data-state=now] .wr-dot{background:var(--wr-tone);border-color:color-mix(in srgb,var(--wr-tone) 40%,transparent);
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--wr-tone) 18%,transparent)}
+.wr-step[data-state=blocked] .wr-dot{background:transparent;border-color:var(--wr-tone);border-style:dashed}
+.wr-step[data-state=blocked]::before{background:color-mix(in srgb,var(--wr-tone) 45%,transparent)}
+.wr-step span{font-size:12px;color:var(--secondary-text-color,#9b9b9b)}
+.wr-step[data-state=done] span{color:var(--primary-text-color,#e1e1e1)}
+.wr-step[data-state=now] span{color:var(--wr-tone);font-weight:500}
+.wr-step[data-state=blocked] span{color:var(--wr-tone)}
+.wr-rail-note{margin-top:13px;font-size:12px;color:var(--secondary-text-color,#9b9b9b)}
+.wr-meter{margin-top:14px}
+.wr-meter-head{display:flex;justify-content:space-between;gap:10px;font-size:12px}
+.wr-meter-head b{font-variant-numeric:tabular-nums}
+.wr-pips{display:flex;gap:5px;margin-top:9px}
+.wr-pips i{flex:1;height:5px;border-radius:5px;background:var(--secondary-background-color,#282828)}
+.wr-pips i.on{background:var(--wr-tone)}
+.wr-bar{height:5px;border-radius:5px;overflow:hidden;margin-top:9px;background:var(--secondary-background-color,#282828)}
+.wr-bar>i{display:block;height:100%;border-radius:5px;background:var(--wr-tone)}
+.wr-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+@keyframes wr-pulse{0%,100%{box-shadow:0 0 0 3px color-mix(in srgb,var(--wr-tone) 16%,transparent)}50%{box-shadow:0 0 0 7px color-mix(in srgb,var(--wr-tone) 8%,transparent)}}
+.wr-card[data-busy=true] .wr-step[data-state=now] .wr-dot{animation:wr-pulse 1.8s ease-in-out infinite}
+
+.wr-controls{padding:9px 24px 13px}
+.wr-control-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 0}
+.wr-label{font-size:13px;min-width:0}
+.wr-label small{display:block;margin-top:3px;max-width:34ch;font-size:11px;font-weight:400;color:var(--secondary-text-color,#9b9b9b)}
+.wr-switch{flex:none;min-width:62px;min-height:36px;padding:6px 14px;border-radius:20px;font-size:13px;
+  border:1px solid var(--divider-color,#3a3a3a);background:var(--secondary-background-color,#282828)}
+/* The switch keeps the accent colour so it always reads as a control, never as
+   a status: state colour stays in the hero, badge, rail and meter. */
+.wr-switch[aria-checked=true]{background:var(--primary-color,#4498c3);border-color:transparent;color:var(--text-primary-color,#fff)}
+.wr-stepper{flex:none;display:flex;align-items:center;gap:2px;padding:2px;border-radius:20px;
+  border:1px solid var(--divider-color,#3a3a3a);background:var(--secondary-background-color,#282828)}
+.wr-stepper button{display:grid;place-items:center;width:32px;height:30px;border-radius:16px;font-size:17px;line-height:1}
+.wr-stepper button:not(:disabled):hover{background:color-mix(in srgb,var(--primary-text-color,#e1e1e1) 10%,transparent)}
+.wr-value{min-width:56px;text-align:center;font-size:13px;font-variant-numeric:tabular-nums}
+
+.wr-more{border-top:1px solid var(--divider-color,#3a3a3a)}
+.wr-more>summary{display:flex;align-items:center;gap:8px;padding:14px 24px;font-size:12px;cursor:pointer;
+  color:var(--secondary-text-color,#9b9b9b);list-style:none}
+.wr-more>summary::-webkit-details-marker{display:none}
+.wr-more>summary .wr-svg{width:16px;height:16px}
+.wr-more>summary::after{content:"▾";margin-left:auto;font-size:11px}
+.wr-more[open]>summary{color:var(--primary-text-color,#e1e1e1)}
+.wr-more[open]>summary::after{content:"▴"}
+.wr-dl{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);gap:7px 16px;margin:0;padding:2px 24px 10px;font-size:12px}
+.wr-dl dt{color:var(--secondary-text-color,#9b9b9b)}
+.wr-dl dd{margin:0;overflow-wrap:anywhere}
+.wr-note{margin:0;padding:4px 24px 16px;font-size:11px;line-height:1.55;color:var(--secondary-text-color,#9b9b9b)}
+.wr-footer{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;
+  padding:12px 24px 14px;border-top:1px solid var(--divider-color,#3a3a3a);font-size:11px}
+.wr-footer span{white-space:nowrap}
+
+@container (max-width:420px){
+  .wr-header{padding:18px 16px 15px}
+  .wr-tile{width:38px;height:38px;border-radius:12px}
+  .wr-card h2{font-size:17px}
+  .wr-hero{margin:0 16px;padding:15px}
+  .wr-card h3{font-size:21px}
+  .wr-rail-wrap,.wr-controls{padding-left:16px;padding-right:16px}
+  .wr-more>summary{padding-left:16px;padding-right:16px}
+  .wr-dl{padding-left:16px;padding-right:16px}
+  .wr-note{padding-left:16px;padding-right:16px}
+  .wr-footer{padding-left:16px;padding-right:16px}
+  .wr-step span{font-size:11px}
+}
+@media (pointer:coarse){.wr-card button,.wr-card summary{min-height:44px!important}}
+@media (prefers-reduced-motion:reduce){.wr-step[data-state=now] .wr-dot{animation:none}}
+
+/* ---- reproduction of the shipped v1.8.33 card, for comparison only ---- */
+.old-card{display:block;padding:16px;border-radius:var(--ha-card-border-radius,20px);overflow:hidden;
+  background:var(--ha-card-background,var(--card-background-color,#1c1c1c));color:var(--primary-text-color,#e1e1e1);
+  box-shadow:var(--ha-card-box-shadow,0 2px 8px rgba(0,0,0,.28));font-size:14px;line-height:1.45}
+.old-card h2{margin:0;font-size:20px;font-weight:400}
+.old-card p{margin:0}
+.old-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.old-status{border-radius:999px;padding:5px 9px;font-size:12px;font-weight:700;background:var(--secondary-background-color,#282828);color:var(--success-color,#5d9e52)}
+.old-reason{color:var(--secondary-text-color,#9b9b9b);margin-top:8px!important}
+.old-metrics{display:grid;grid-template-columns:repeat(3,minmax(100px,1fr));gap:8px;margin:14px 0}
+.old-metric{background:var(--secondary-background-color,#282828);border-radius:10px;padding:10px;border-left:3px solid var(--primary-color,#4498c3)}
+.old-metric span{display:block;color:var(--secondary-text-color,#9b9b9b);font-size:11px}
+.old-metric strong{display:block;margin-top:4px;font-size:16px;font-weight:500}
+.old-grace{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;padding:10px;
+  background:var(--secondary-background-color,#282828);border-radius:10px;font-weight:600}
+.old-grace small{display:block;color:var(--secondary-text-color,#9b9b9b);font-weight:400;margin-top:2px}
+.old-grace i{width:76px;padding:8px;border:1px solid var(--divider-color,#3a3a3a);border-radius:7px;
+  background:var(--card-background-color,#1c1c1c);font-style:normal;text-align:center}
+.old-btn{width:100%;border:0;border-radius:10px;padding:11px;font-weight:700;font:inherit;font-weight:700;cursor:pointer;
+  background:var(--secondary-background-color,#282828);color:var(--primary-text-color,#e1e1e1)}
+.old-foot{margin-top:10px!important;font-size:11px;color:var(--secondary-text-color,#9b9b9b)}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">AFERIY PS240 · Home Assistant custom card · design mockup</p>
+      <h1>Wi-Fi loss recovery, rebuilt in the Cosy design language</h1>
+      <p class="lede">Same philosophy as the overhauled Cosy Octopus plan card: <b>one state-coloured hero</b> that
+        says what is happening now, <b>one progress rail</b> that shows where the recovery is, <b>controls that are
+        reachable</b>, and every diagnostic demoted to collapsible detail. Every panel below is rendered from the
+        real entity attributes the integration publishes — including the guarded failure, cooldown and
+        authentication states. Nothing about the recovery policy changes: one verified 6&nbsp;↔&nbsp;11 channel
+        change per outage, a one-hour cooldown, and an explicit opt-in.</p>
+    </div>
+    <div class="theme-toggle" role="group" aria-label="Theme">
+      <button type="button" data-theme-btn="dark" aria-pressed="true">Dark</button>
+      <button type="button" data-theme-btn="light" aria-pressed="false">Light</button>
+    </div>
+  </header>
+
+  <section class="sec">
+    <div class="sec-head"><h2>Healthy states</h2><p>Armed and watching · recovery off · first-time setup</p></div>
+    <div class="gallery" id="g-normal"></div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head"><h2>An outage, step by step</h2><p>The rail tracks the documented sequence: watch → wait → switch → verify</p></div>
+    <div class="gallery" id="g-progress"></div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head"><h2>Failure and guard states</h2><p>Cooldown, rejected credentials, unverified change, and the enable check</p></div>
+    <div class="gallery" id="g-faults"></div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head"><h2>The details block, expanded</h2><p>Everything that used to be a tile, one tap away</p></div>
+    <div class="gallery" id="g-details"></div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head"><h2>Narrow container (360 px)</h2><p>The same markup inside a phone-width column</p></div>
+    <div class="gallery narrow" id="g-narrow"></div>
+  </section>
+
+  <section class="sec" id="sec-compare">
+    <div class="sec-head"><h2>Before and after</h2><p>Shipped v1.8.33 card next to the proposal, same data</p></div>
+    <div class="compare">
+      <figure class="frame">
+        <figcaption><b>Current card (v1.8.33, reproduced)</b><span>eight equal tiles, no state hierarchy</span></figcaption>
+        <div class="slot">
+          <div class="old-card">
+            <div class="old-head">
+              <div><h2>Wi-Fi loss recovery</h2><p class="old-reason">PS240 unavailable → Linksys channel 6 ↔ 11</p></div>
+              <span class="old-status">Monitoring</span>
+            </div>
+            <p class="old-reason">Waiting for the PS240 to become unavailable after sustained poll failures.</p>
+            <div class="old-metrics">
+              <div class="old-metric"><span>Battery</span><strong>Available</strong></div>
+              <div class="old-metric"><span>Current channel</span><strong>6</strong></div>
+              <div class="old-metric"><span>Next recovery</span><strong>11</strong></div>
+              <div class="old-metric"><span>Poll failures</span><strong>0 / 6</strong></div>
+              <div class="old-metric"><span>Grace period</span><strong>6 min</strong></div>
+              <div class="old-metric"><span>Last result</span><strong>No attempt</strong></div>
+              <div class="old-metric"><span>Last attempt</span><strong>—</strong></div>
+            </div>
+            <div class="old-grace"><label>Grace period<small>0 changes immediately; valid telemetry cancels the wait.</small></label><i>6</i></div>
+            <button class="old-btn">Disable recovery</button>
+            <p class="old-foot">One verified channel change per outage. Recovery during the grace period cancels it; a one-hour cooldown prevents repeats.</p>
+          </div>
+        </div>
+      </figure>
+      <div class="slot" id="g-side"></div>
+    </div>
+    <div class="note-panel">
+      <h3>What moved, and why</h3>
+      <table>
+        <tr><th>Status</th><td>A pill in the corner becomes the <b>hero headline in the current state colour</b> — green armed, amber waiting, red failed, grey off.</td></tr>
+        <tr><th>Eight metrics</th><td>Reduced to <b>two facts in the hero foot</b> plus a failure pip meter. Router, cooldown, verification window and history move into <b>one details block</b>.</td></tr>
+        <tr><th>Timing</th><td>ISO strings such as <span class="wr-muted">2026-09-16T13:38:00+00:00</span> become a <b>live countdown</b> with a clock time, the way the Cosy card shows its next charge.</td></tr>
+        <tr><th>Flow</th><td>The policy sentence becomes a <b>four-step rail</b>: watch, wait, switch, verify. Blocked and completed steps are visible.</td></tr>
+        <tr><th>Controls</th><td>The full-width button and raw number input become a <b>pill switch and a stepped value</b> matching the Cosy control rows, still 0–60 minutes.</td></tr>
+        <tr><th>Isolation</th><td>The card moves into a <b>shadow root</b>. Today it injects bare <span class="wr-muted">h2 / p / button</span> rules into the whole dashboard.</td></tr>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+/* ============================================================================
+   1. Card CSS. The .wr-* rules in the page stylesheet above — from `.wr-card`
+      to the container query and coarse-pointer block — are the exact string the
+      implementation injects into the card's shadow root. (Styles outside that
+      block belong to this mockup page.)
+   ========================================================================== */
+
+/* ============================================================================
+   2. Icons. The implementation uses <ha-icon icon="mdi:...">; the mockup draws
+      the same shapes inline so it renders in a plain browser.
+   ========================================================================== */
+const PATHS = {
+  wifi: '<path d="M2.8 8.6a13.4 13.4 0 0 1 18.4 0"/><path d="M6.3 12.2a8.6 8.6 0 0 1 11.4 0"/><path d="M9.4 15.7a4 4 0 0 1 5.2 0"/><circle cx="12" cy="18.9" r="1.05" fill="currentColor" stroke="none"/>',
+  wifiOff: '<path d="M2.8 8.6a13.4 13.4 0 0 1 18.4 0"/><path d="M6.3 12.2a8.6 8.6 0 0 1 11.4 0"/><circle cx="12" cy="18.9" r="1.05" fill="currentColor" stroke="none"/><path d="M4 20 20 4"/>',
+  clock: '<circle cx="12" cy="12" r="8.4"/><path d="M12 7.4V12l3.1 2"/>',
+  swap: '<path d="M4 8.6h13"/><path d="M13.6 5.2 17 8.6l-3.4 3.4"/><path d="M20 15.4H7"/><path d="M10.4 12 7 15.4l3.4 3.4"/>',
+  check: '<path d="M5 12.7 9.6 17.3 19 7.6"/>',
+  shield: '<path d="M12 3.6 19 6.2v5.6c0 4.2-2.8 7.5-7 8.6-4.2-1.1-7-4.4-7-8.6V6.2z"/><path d="M9.2 12.2 11.4 14.4 15 10.4"/>',
+  alert: '<path d="M12 4.4 21 19.6H3z"/><path d="M12 9.8v4.4"/><circle cx="12" cy="16.9" r=".95" fill="currentColor" stroke="none"/>',
+  router: '<rect x="3.1" y="12.4" width="17.8" height="7.6" rx="2.4"/><circle cx="7.1" cy="16.2" r=".95" fill="currentColor" stroke="none"/><circle cx="10.4" cy="16.2" r=".95" fill="currentColor" stroke="none"/><path d="M12 12.4V9"/><path d="M9.3 6.4a4.2 4.2 0 0 1 5.4 0"/>',
+};
+const icon = (name, cls = "") =>
+  `<svg class="wr-svg ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name] || PATHS.wifi}</svg>`;
+
+/* ============================================================================
+   3. Presentation mapping — status attributes in, ranked view model out.
+      This is the logic the implementation should port one-to-one.
+   ========================================================================== */
+const MIN = 60000;
+const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
+const time = ts => new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(new Date(ts));
+const countdown = (ts, now) => {
+  const total = Math.max(0, Math.round((ts - now) / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+};
+const ago = (ts, now) => {
+  const minutes = Math.max(0, Math.round((now - ts) / MIN));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 36 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
+};
+const RESULT = { verified: "Channel change verified", failed: "Channel change not verified", authentication_failed: "Router rejected the credentials" };
+
+function view(raw, now) {
+  const a = raw.attributes || {};
+  const on = raw.state === "on";
+  const configured = a.configured !== false;
+  const failures = a.current_consecutive_failures ?? 0;
+  const threshold = a.trigger_after_consecutive_failures ?? 6;
+  const channel = a.current_2_4ghz_channel;
+  const target = a.requested_channel ?? (channel === 6 ? 11 : channel === 11 ? 6 : null);
+  const graceEnds = a.grace_period_ends_at ? Date.parse(a.grace_period_ends_at) : 0;
+  const cooldownEnds = a.next_allowed_attempt_at ? Date.parse(a.next_allowed_attempt_at) : 0;
+  const status = a.status || (on ? "Monitoring" : "Off");
+  const grace = a.grace_period_minutes ?? 0;
+  const router = configured ? a.router_model || "Linksys router" : "Not configured";
+  const changed = channel != null && a.last_result === "verified";
+
+  const v = {
+    title: raw.title || "Wi-Fi loss recovery",
+    subtitle: "Guarded Linksys 2.4 GHz · AFERIY",
+    tone: "idle", icon: "wifiOff", badge: "○ Off",
+    kicker: "AUTOMATIC RECOVERY · OFF", headline: "Recovery is off",
+    reason: "Nothing will change your router channel while this is off.",
+    hint: "", facts: [], rail: null, railNote: "", meter: null, busy: false,
+    switchState: on ? "on" : "off", switchDisabled: false,
+    open: Boolean(raw.openDetails),
+    switchHelp: "Opt in to one guarded channel change during a Wi-Fi outage.",
+    graceHelp: "0 changes the channel immediately. Valid telemetry during the wait cancels it.",
+    grace,
+    details: [],
+    note: "The router is only asked for the 2.4 GHz channel number. Credentials never reach the card, the entity attributes or the log.",
+    footer: [a.battery_available === false ? "Battery offline" : "Battery available", router],
+  };
+  const meter = {
+    label: "Consecutive poll failures",
+    value: `${failures} of ${threshold}`,
+    pips: Math.min(threshold, 12),
+    filled: Math.min(failures, threshold, 12),
+    pct: Math.min(100, (failures / Math.max(threshold, 1)) * 100),
+    bar: threshold > 12,
+  };
+  const spokenMinutes = deadline => () => `under ${Math.max(1, Math.ceil((deadline - Date.now()) / MIN))} minutes`;
+  const rail = states => states;
+  const facts = (...pairs) => pairs.map(([label, value]) => ({ label, value }));
+
+  switch (status) {
+    case "Monitoring":
+      v.tone = "success"; v.icon = "wifi"; v.badge = "● Monitoring"; v.kicker = "ARMED · WATCHING";
+      v.headline = "Watching the battery link";
+      v.reason = a.reason || "Waiting for the PS240 to become unavailable after sustained poll failures.";
+      v.facts = facts(["Battery", "available"], ["Next channel", channel ? `${channel} → ${target}` : "unknown"]);
+      v.rail = rail(["now", "todo", "todo", "todo"]);
+      v.railNote = "Armed. Nothing happens unless the battery goes quiet.";
+      v.meter = meter;
+      v.switchHelp = "Armed. Turn off to stop automatic changes.";
+      break;
+
+    case "Grace period":
+      v.tone = "warning"; v.icon = "clock"; v.badge = "● Grace period"; v.kicker = "OUTAGE · GRACE PERIOD";
+      v.headline = "Channel change is waiting";
+      v.tick = { lead: "Channel change in ", deadline: graceEnds, spoken: spokenMinutes(graceEnds) };
+      v.reason = `The PS240 is unavailable. The 2.4 GHz channel changes to ${target ?? "the alternate channel"} at ${graceEnds ? time(graceEnds) : "—"} unless telemetry returns first.`;
+      v.hint = failures >= threshold ? `${failures} consecutive poll failures confirmed the outage.` : "";
+      v.facts = facts(["Change due", graceEnds ? time(graceEnds) : "—"], ["Poll failures", `${failures} of ${threshold}`]);
+      v.rail = rail(["done", "now", "todo", "todo"]);
+      v.railNote = "Valid battery telemetry during the wait cancels the channel change.";
+      v.meter = meter;
+      v.switchHelp = "Turning off cancels the pending channel change.";
+      v.graceHelp = "Changing this recalculates the wait that is running.";
+      break;
+
+    case "Changing channel":
+      v.tone = "warning"; v.icon = "swap"; v.badge = "● Changing channel"; v.kicker = "OUTAGE · CHANGING CHANNEL";
+      v.headline = `Switching channel ${channel ?? "—"} → ${target ?? "—"}`;
+      v.reason = `The PS240 is unavailable after ${failures} consecutive poll failures. The channel is re-read from the router to verify the change.`;
+      v.facts = facts(["Requested channel", target ?? "—"], ["Poll failures", `${failures} of ${threshold}`]);
+      v.rail = rail(["done", "done", "now", "todo"]);
+      v.railNote = "Only the channel number changes. Everything else on the radio is preserved.";
+      v.meter = meter;
+      v.busy = true;
+      v.switchHelp = "A change already in progress finishes first.";
+      break;
+
+    case "Waiting for battery":
+      v.tone = "success"; v.icon = "wifi"; v.badge = "● Waiting for battery"; v.kicker = "CHANGE VERIFIED · WAITING";
+      v.headline = `Channel ${channel ?? target ?? "—"} verified · waiting for telemetry`;
+      v.reason = "The router reports the new channel. Recovery completes when the PS240 answers a poll again.";
+      v.facts = facts(["Verified channel", String(channel ?? target ?? "—")], ["Cooldown starts", a.last_attempt_at ? time(Date.parse(a.last_attempt_at)) : "—"]);
+      v.rail = rail(["done", "done", "done", "now"]);
+      v.railNote = "No further change is attempted for this outage.";
+      v.meter = meter;
+      v.switchHelp = "Armed. The next outage starts a fresh attempt.";
+      break;
+
+    case "Recovered":
+      v.tone = "success"; v.icon = "check"; v.badge = "● Recovered"; v.kicker = "RECOVERED · WATCHING";
+      v.headline = "Battery telemetry is back";
+      v.reason = a.last_battery_recovery_at
+        ? `Valid PS240 telemetry resumed at ${time(Date.parse(a.last_battery_recovery_at))}.`
+        : "Valid PS240 telemetry has resumed.";
+      v.facts = facts(["Recovered at", a.last_battery_recovery_at ? time(Date.parse(a.last_battery_recovery_at)) : "—"], ["Channel", String(channel ?? "—")]);
+      v.rail = rail(["done", "done", "done", "done"]);
+      v.railNote = "This outage is closed. Watching resumes for the next one.";
+      v.meter = meter;
+      break;
+
+    case "Cooldown":
+      v.tone = "warning"; v.icon = "clock"; v.badge = "● Cooldown"; v.kicker = "OUTAGE · COOLDOWN";
+      v.headline = "Cooling down after one channel change";
+      v.tick = { lead: "Next change allowed in ", deadline: cooldownEnds, spoken: spokenMinutes(cooldownEnds) };
+      v.reason = `The PS240 is still unavailable, but the ${a.cooldown_hours ?? 1}-hour guard blocks another router change until ${cooldownEnds ? time(cooldownEnds) : "—"}.`;
+      v.hint = "Nothing else happens automatically for this outage. A router restart or a manual channel change may still be needed.";
+      v.facts = facts(["Blocked until", cooldownEnds ? time(cooldownEnds) : "—"], ["Poll failures", `${failures} of ${threshold}`]);
+      v.rail = rail(["done", "done", "blocked", "todo"]);
+      v.railNote = "One channel change per outage, then a one-hour pause.";
+      v.meter = meter;
+      v.switchHelp = "Turn off to stop automatic changes.";
+      break;
+
+    case "Checking router":
+      v.tone = "info"; v.icon = "router"; v.badge = "● Checking router"; v.kicker = "ENABLING · VALIDATING ACCESS";
+      v.headline = "Checking local router access";
+      v.reason = "Read-only validation of the Linksys address and password before recovery is armed.";
+      v.facts = facts(["Router", router], ["Policy", "no settings changed"]);
+      v.switchState = "pending";
+      v.busy = true;
+      v.switchHelp = "Validation in progress.";
+      break;
+
+    case "Authentication failed":
+      v.tone = "error"; v.icon = "shield"; v.badge = "● Sign-in failed"; v.kicker = "OUTAGE · ROUTER SIGN-IN FAILED";
+      v.headline = "The router rejected the credentials";
+      v.reason = "The Linksys router refused the local administrator credentials, so no channel change was attempted.";
+      v.hint = "Update the Linksys address or sign-in in the integration options. Recovery stays off until a check succeeds.";
+      v.facts = facts(["Last result", "authentication failed"], ["Poll failures", `${failures} of ${threshold}`]);
+      v.rail = rail(["done", "done", "blocked", "todo"]);
+      v.railNote = "The change stopped before the channel was touched. Nothing was altered on the router.";
+      v.meter = meter;
+      break;
+
+    case "Failed":
+      v.tone = "error"; v.icon = "alert"; v.badge = "● Change failed"; v.kicker = "OUTAGE · CHANGE FAILED";
+      v.headline = "The channel change could not be verified";
+      v.reason = `The router did not report channel ${target ?? "the new channel"} within 45 seconds, so recovery stopped.`;
+      v.hint = "No further change is attempted for this outage. Check the router, then let the next outage retry after the cooldown.";
+      v.facts = facts(["Last attempt", a.last_attempt_at ? `${time(Date.parse(a.last_attempt_at))} · ${ago(Date.parse(a.last_attempt_at), now)}` : "—"], ["Result", "not verified"]);
+      v.rail = rail(["done", "done", "blocked", "todo"]);
+      v.railNote = "One attempt per outage. The next outage may try again after the cooldown.";
+      v.meter = meter;
+      break;
+
+    default: /* Off, configured or not */
+      if (!configured) {
+        v.tone = "error"; v.icon = "router"; v.badge = "○ Setup needed"; v.kicker = "GUARDED RECOVERY · NOT CONFIGURED";
+        v.headline = "Router not configured";
+        v.reason = "Add the Linksys router address and local administrator password in the integration options.";
+        v.hint = "Settings → Devices & Services → AFERIY PS240 → Configure.";
+        v.facts = facts(["Router", "not configured"], ["Allowed channels", "6 ↔ 11"]);
+        v.switchState = "unavailable"; v.switchDisabled = true;
+        v.switchHelp = "Recovery cannot be armed until the router details are saved.";
+      } else if (!on && a.battery_available === false) {
+        v.tone = "warning"; v.icon = "wifiOff"; v.badge = "○ Off · battery offline"; v.kicker = "OUTAGE · RECOVERY OFF";
+        v.headline = "Battery offline and recovery is off";
+        v.reason = `The PS240 has missed ${failures} polls and no channel change will be made.`;
+        v.hint = "Turn recovery on to arm automatic changes for the next outage.";
+        v.facts = facts(["Battery", "offline"], ["Poll failures", `${failures} of ${threshold}`]);
+      } else {
+        v.facts = facts(["Battery", "available"], ["Would change", channel ? `${channel} → ${target}` : "6 → 11"]);
+        v.hint = "Turn recovery on to allow one verified channel change per Wi-Fi outage.";
+      }
+  }
+
+  v.details = [
+    ["Router", router],
+    ["Allowed channels", "6 ↔ 11 only · SSID, security and 5 GHz are untouched"],
+    ["Trigger", `After ${threshold} consecutive poll failures`],
+    ["Cooldown", `${a.cooldown_hours ?? 1} hour between changes · survives restarts`],
+    ["Verification", "Channel re-read from the router within 45 seconds"],
+    ["Grace period", `${grace} min · 0 changes the channel as soon as the outage is confirmed`],
+    ["Last attempt", a.last_attempt_at ? `${time(Date.parse(a.last_attempt_at))} · ${ago(Date.parse(a.last_attempt_at), now)}` : "No attempt yet"],
+    ["Last result", RESULT[a.last_result] || "No attempt yet"],
+    ["Last recovery", a.last_battery_recovery_at ? `${time(Date.parse(a.last_battery_recovery_at))} · ${ago(Date.parse(a.last_battery_recovery_at), now)}` : "None since setup"],
+  ];
+  v.footer = [a.battery_available === false ? "Battery offline" : "Battery available", changed ? `${router} · channel ${channel}` : router];
+  return v;
+}
+
+/* ============================================================================
+   4. Render — one function, one card.
+   ========================================================================== */
+function cardHTML(v, nowMs) {
+  const rail = v.rail
+    ? `<section class="wr-sec wr-rail-wrap">
+         <ol class="wr-rail" aria-label="Recovery progress">
+           ${["Watch", "Wait", "Switch", "Verify"].map((label, index) => {
+             const state = v.rail[index];
+             const spoken = { done: "completed", now: "current step", blocked: "blocked", todo: "upcoming" }[state];
+             return `<li class="wr-step" data-state="${state}"${state === "now" ? ' aria-current="step"' : ""}>
+                <i class="wr-dot" aria-hidden="true"></i><span>${label}</span><span class="wr-sr">, ${spoken}</span></li>`;
+           }).join("")}
+         </ol>
+         ${v.railNote ? `<p class="wr-rail-note">${esc(v.railNote)}</p>` : ""}
+         ${v.meter ? `<div class="wr-meter">
+            <div class="wr-meter-head"><span class="wr-muted">${esc(v.meter.label)}</span><b>${esc(v.meter.value)}</b></div>
+            ${v.meter.bar
+              ? `<div class="wr-bar"><i style="width:${v.meter.pct}%"></i></div>`
+              : `<div class="wr-pips">${Array.from({ length: v.meter.pips }, (_, index) => `<i class="${index < v.meter.filled ? "on" : ""}"></i>`).join("")}</div>`}
+          </div>` : ""}
+       </section>`
+    : "";
+  // A running countdown ticks every second; screen readers get the minute instead.
+  const headline = v.tick
+    ? `${esc(v.tick.lead)}<span aria-hidden="true">${countdown(v.tick.deadline, nowMs)}</span><span class="wr-sr">${esc(v.tick.spoken(nowMs))}</span>`
+    : esc(v.headline);
+  const help = (label, text) => `<div class="wr-label">${esc(label)}<small>${esc(text)}</small></div>`;
+  return `<ha-card class="wr-card" data-tone="${v.tone}" data-busy="${v.busy}">
+  <header class="wr-header">
+    <div class="wr-title"><span class="wr-tile">${icon(v.icon)}</span>
+      <div><h2>${esc(v.title)}</h2><div class="wr-sub wr-muted">${esc(v.subtitle)}</div></div></div>
+    <span class="wr-badge">${esc(v.badge)}</span>
+  </header>
+  <section class="wr-hero" aria-live="polite">
+    <div class="wr-kicker">${esc(v.kicker)}</div>
+    <h3>${headline}</h3>
+    <p class="wr-reason wr-muted">${esc(v.reason)}</p>
+    ${v.hint ? `<p class="wr-hint">${esc(v.hint)}</p>` : ""}
+    <div class="wr-foot">${v.facts.map(f => `<span>${esc(f.label)} <b>${esc(f.value)}</b></span>`).join("")}</div>
+  </section>
+  ${rail}
+  <section class="wr-sec wr-controls">
+    <div class="wr-control-row">${help("Automatic recovery", v.switchHelp)}
+      <button class="wr-switch" role="switch" aria-checked="${v.switchState === "on"}" aria-label="Automatic recovery"
+        ${v.switchDisabled ? 'disabled aria-disabled="true"' : ""}>${v.switchState === "on" ? "On" : v.switchState === "pending" ? "Checking…" : v.switchState === "unavailable" ? "Unavailable" : "Off"}</button>
+    </div>
+    <div class="wr-control-row">${help("Grace period", v.graceHelp)}
+      <div class="wr-stepper" role="group" aria-label="Grace period in minutes">
+        <button type="button" aria-label="Decrease grace period" ${v.grace <= 0 ? "disabled" : ""}>−</button>
+        <span class="wr-value" aria-live="polite">${v.grace} min</span>
+        <button type="button" aria-label="Increase grace period" ${v.grace >= 60 ? "disabled" : ""}>+</button>
+      </div>
+    </div>
+  </section>
+  <details class="wr-more"${v.open ? " open" : ""}>
+    <summary>${icon("shield")} Guardrails, router and history</summary>
+    <dl class="wr-dl">${v.details.map(([label, value]) => `<dt>${esc(label)}</dt><dd>${esc(value)}</dd>`).join("")}</dl>
+    <p class="wr-note">${esc(v.note)}</p>
+  </details>
+  <footer class="wr-footer wr-muted"><span>${esc(v.footer[0])}</span><span>${esc(v.footer[1])}</span></footer>
+</ha-card>`;
+}
+
+/* ============================================================================
+   5. Fixtures — real attribute shapes from wifi_recovery.py state_attributes.
+   ========================================================================== */
+const now = Date.now();
+const at = offsetMinutes => new Date(now + offsetMinutes * MIN).toISOString();
+const base = {
+  configured: true, router_model: "Linksys MX4200", allowed_channels: [6, 11],
+  trigger_after_consecutive_failures: 6, current_consecutive_failures: 0,
+  battery_available: true, cooldown_hours: 1, grace_period_minutes: 6,
+  grace_period_ends_at: null, last_attempt_at: null, next_allowed_attempt_at: null,
+  requested_channel: null, last_result: null, last_battery_recovery_at: at(-140),
+  current_2_4ghz_channel: 6,
+  policy: "One 6/11 channel toggle per outage after the battery becomes unavailable.",
+};
+const monitoring = { ...base, status: "Monitoring", reason: "Waiting for the PS240 to become unavailable after sustained poll failures." };
+const FIXTURES = [
+  { id: "monitoring", group: "normal", label: "Monitoring · armed", note: "status Monitoring · switch on", state: "on", attributes: monitoring },
+  { id: "off", group: "normal", label: "Recovery off", note: "status Off · switch off", state: "off", attributes: { ...base, status: "Off", reason: "Wi-Fi loss recovery is off.", last_battery_recovery_at: null } },
+  { id: "unconfigured", group: "normal", label: "First-time setup", note: "configured false", state: "off", attributes: { ...base, status: "Configuration required", reason: "Add the Linksys router address and local administrator password in the integration options.", configured: false, router_model: null, current_2_4ghz_channel: null, last_battery_recovery_at: null } },
+  { id: "checking", group: "normal", label: "Enabling", note: "status Checking router", state: "off", attributes: { ...base, status: "Checking router", reason: "Validating local Linksys access without changing settings." } },
+  { id: "grace", group: "progress", label: "Grace period · counting down", note: "status Grace period · live timer", state: "on", attributes: { ...base, status: "Grace period", current_consecutive_failures: 6, battery_available: false, grace_period_ends_at: at(5.7), reason: "Waiting for the PS240 to recover before changing the router channel." } },
+  { id: "changing", group: "progress", label: "Changing channel", note: "status Changing channel", state: "on", attributes: { ...base, status: "Changing channel", current_consecutive_failures: 6, battery_available: false, requested_channel: 11 } },
+  { id: "waiting", group: "progress", label: "Change verified", note: "status Waiting for battery", state: "on", attributes: { ...base, status: "Waiting for battery", current_consecutive_failures: 6, battery_available: false, current_2_4ghz_channel: 11, requested_channel: 11, last_result: "verified", last_attempt_at: at(-2) } },
+  { id: "recovered", group: "progress", label: "Recovered", note: "status Recovered", state: "on", attributes: { ...base, status: "Recovered", current_2_4ghz_channel: 11, requested_channel: 11, last_result: "verified", last_attempt_at: at(-3), last_battery_recovery_at: at(-1.4) } },
+  { id: "cooldown", group: "faults", label: "Cooldown after one change", note: "status Cooldown", state: "on", attributes: { ...base, status: "Cooldown", current_consecutive_failures: 6, battery_available: false, current_2_4ghz_channel: 11, requested_channel: 11, last_result: "verified", last_attempt_at: at(-18), next_allowed_attempt_at: at(41.6), last_battery_recovery_at: null } },
+  { id: "offlineOff", group: "faults", label: "Battery offline · recovery off", note: "status Off · battery unavailable", state: "off", attributes: { ...base, status: "Off", current_consecutive_failures: 6, battery_available: false, reason: "The PS240 is unavailable, but Wi-Fi loss recovery is off." } },
+  { id: "authFailed", group: "faults", label: "Router rejected the credentials", note: "status Authentication failed", state: "on", attributes: { ...base, status: "Authentication failed", current_consecutive_failures: 6, battery_available: false, last_result: "authentication_failed", last_attempt_at: at(-12), last_battery_recovery_at: null } },
+  { id: "failed", group: "faults", label: "Change not verified", note: "status Failed", state: "on", attributes: { ...base, status: "Failed", current_consecutive_failures: 6, battery_available: false, requested_channel: 11, last_result: "failed", last_attempt_at: at(-9), last_battery_recovery_at: null } },
+  { id: "monitoringOpen", group: "details", label: "Monitoring · details open", note: "same card, guardrails expanded", state: "on", attributes: monitoring, openDetails: true },
+  { id: "failedOpen", group: "details", label: "Failed · details open", note: "history after a failed change", state: "on", openDetails: true, attributes: { ...base, status: "Failed", current_consecutive_failures: 6, battery_available: false, requested_channel: 11, last_result: "failed", last_attempt_at: at(-9), last_battery_recovery_at: null } },
+];
+
+/* ============================================================================
+   6. Gallery: render, then keep live timers honest.
+   ========================================================================== */
+const params = new URLSearchParams(location.search);
+if (params.get("theme") === "light") setTheme("light");
+const only = params.get("only");
+function setTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  document.querySelectorAll("[data-theme-btn]").forEach(button =>
+    button.setAttribute("aria-pressed", String(button.dataset.themeBtn === theme)));
+}
+document.querySelectorAll("[data-theme-btn]").forEach(button =>
+  button.addEventListener("click", () => setTheme(button.dataset.themeBtn)));
+
+function render(nowMs) {
+  ["normal", "progress", "faults", "details"].forEach(group => {
+    const target = document.getElementById(`g-${group}`);
+    if (!target) return;
+    target.innerHTML = FIXTURES.filter(f => f.group === group && (!only || only.split(",").includes(f.id)))
+      .map(f => `<figure class="frame">
+        <figcaption><b>${esc(f.label)}</b><span>${esc(f.note)}</span></figcaption>
+        <div class="slot">${cardHTML(view(f, nowMs), nowMs)}</div>
+      </figure>`).join("");
+  });
+  const narrow = document.getElementById("g-narrow");
+  narrow.innerHTML = ["monitoring", "grace", "cooldown"]
+    .map(id => FIXTURES.find(f => f.id === id))
+    .map(f => `<figure class="frame">
+      <figcaption><b>${esc(f.label)}</b><span>360 px container</span></figcaption>
+      <div class="slot">${cardHTML(view(f, nowMs), nowMs)}</div>
+    </figure>`).join("");
+  const side = document.getElementById("g-side");
+  if (side) {
+    const monitoring = FIXTURES.find(f => f.id === "monitoring");
+    side.innerHTML = `<figure class="frame">
+      <figcaption><b>Proposed card</b><span>same data, ranked</span></figcaption>
+      <div class="slot">${cardHTML(view(monitoring, nowMs), nowMs)}</div>
+    </figure>`;
+  }
+  // ?only=id1,id2 renders a tight sheet: drop sections and comparisons that are empty.
+  if (only) document.querySelectorAll(".sec").forEach(section => {
+    if (!section.querySelector(".frame") || section.id === "sec-compare") section.remove();
+  });
+}
+render(now);
+// Grace and cooldown deadlines tick; every other state is static.
+if (FIXTURES.some(f => f.attributes.grace_period_ends_at || f.attributes.next_allowed_attempt_at)) {
+  setInterval(() => render(Date.now()), 1000);
+}
+</script>
+</body>
+</html>

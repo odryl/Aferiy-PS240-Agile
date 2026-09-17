@@ -61,11 +61,11 @@ firmware update or while changing the logger's network settings.
 
 ### Recover from sustained PS240 Wi-Fi loss
 
-<img src="images/card.png" alt="Wi-Fi loss recovery card showing battery availability, current and next recovery channel, poll failures, grace period, and last attempt result" width="560">
+<img src="images/wifi-recovery-card.png" alt="Wi-Fi loss recovery card showing the armed state, the watch, wait, switch and verify rail, the poll-failure pips, and the opt-in controls" width="420">
 
-*The Wi-Fi loss recovery card, shown here under the Cosy plan card: battery
-availability, current and next recovery channel, poll failures against the
-6-poll trigger, the grace period, and the last attempt result.*
+*The Wi-Fi loss recovery card: the current state in the hero, the recovery rail,
+consecutive poll failures against the 6-poll trigger, and the guarded opt-in and
+grace-period controls. Router details and history sit behind one details block.*
 
 The optional **Wi-Fi Loss Recovery** controller is intended for the tested
 Linksys SPNMX56TB/Velop JNAP interface. Configure the Linksys router address and
@@ -94,7 +94,7 @@ For a dedicated dashboard area, register this JavaScript module under
 **Settings → Dashboards → Resources**:
 
 ```text
-/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.33
+/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.34
 ```
 
 Then add **AFERIY Wi-Fi Loss Recovery** from the card picker, or use:
@@ -218,7 +218,7 @@ off-peak window and any SMART forecast/demand tuning that has been applied.
 To make it available in Home Assistant's card picker:
 
 1. Restart Home Assistant after installing or updating the integration.
-2. Add dashboard resource `/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.33`
+2. Add dashboard resource `/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.34`
    as a JavaScript module.
 3. Edit a dashboard, choose Add card, switch to By card, and search for
    `AFERIY Overnight Plan`.

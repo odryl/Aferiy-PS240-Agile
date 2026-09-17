@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.8.34
+
+- Redesign the Wi-Fi loss recovery card in the Cosy plan card's design language:
+  one state-coloured hero (armed, grace period, changing channel, cooling down,
+  failed, off), a four-step watch/wait/switch/verify rail, a poll-failure pip
+  meter, and the opt-in switch and 0-60 minute grace stepper as the only
+  controls. Router, cooldown, verification window and history move into one
+  **Guardrails, router and history** details block.
+- Replace ISO timestamps in the card's prose with a clock time and a live
+  countdown that ticks once a second only while a grace or cooldown deadline is
+  pending. Screen readers are told the remaining minutes instead of a per-second
+  value, and an expired deadline becomes a plain sentence.
+- Render the card inside a shadow root. The previous version injected bare `h2`,
+  `p` and `button` rules into the whole dashboard.
+- Never adopt another battery's grace period: the number entity is derived from
+  the recovery switch, and an ambiguous or missing recovery switch now asks for
+  the `entity` option instead of guessing between AFERIY entries.
+- Add regression coverage for the card's state mapping, countdowns, guarded
+  service calls, escaping, entity discovery and ticker cleanup, and register the
+  card file with the dashboard syntax check.
+
 ## 1.8.33
 
 - Consume Energy Dashboard solar forecasts for just-in-time charging with grid-only

@@ -239,6 +239,8 @@ python3 -m pytest -q
 python3 -m compileall -q custom_components/aecc_battery
 python3 -m ruff check custom_components/aecc_battery/agile.py custom_components/aecc_battery/const.py custom_components/aecc_battery/switch.py tests/test_agile_planner.py tests/test_agile_home_assistant_wiring.py
 node --check custom_components/aecc_battery/frontend/aferiy-agile-plan-card.js
+node --check custom_components/aecc_battery/frontend/aferiy-wifi-recovery-card.js
+node --test tests/test_cosy_card.cjs tests/test_wifi_recovery_card.cjs
 python3 -m json.tool custom_components/aecc_battery/manifest.json >/dev/null
 git diff --check
 ```

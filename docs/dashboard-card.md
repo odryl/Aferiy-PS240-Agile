@@ -15,7 +15,7 @@ Post-Sunset Need, useful solar, confidence, and SMART History completeness.
 After installing or updating the integration and restarting Home Assistant, add this dashboard resource:
 
 ```text
-/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.33
+/aecc_battery_static/aferiy-overnight-plan-card.js?v=1.8.34
 ```
 
 Set the resource type to:
@@ -52,10 +52,15 @@ The card reads the calculation from the Recommended Overnight SOC sensor. It doe
 
 ## Wi-Fi Loss Recovery Card
 
+<img src="images/wifi-recovery-card.png" alt="Wi-Fi loss recovery card showing the armed hero, the watch, wait, switch and verify rail, the poll-failure pips and the opt-in controls" width="420">
+
+*The guarded Wi-Fi loss recovery card, in the same design language as the Cosy
+plan card.*
+
 The separate guarded recovery card is available at:
 
 ```text
-/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.33
+/aecc_battery_static/aferiy-wifi-recovery-card.js?v=1.8.34
 ```
 
 After registering it as a JavaScript module, add **AFERIY Wi-Fi Loss Recovery**
@@ -66,15 +71,22 @@ type: custom:aferiy-wifi-recovery-card
 title: Wi-Fi loss recovery
 ```
 
-The card shows whether the PS240 is available, the current and next Linksys
-2.4 GHz channels, consecutive failures, the grace deadline, and the opt-in
-switch. Its 0–60 minute grace-period control is persisted by the integration;
-valid telemetry before the deadline cancels the channel change. It never
-receives or displays router credentials or Wi-Fi passphrases.
+The card leads with the state that matters now: armed and watching, waiting out
+the grace period with a live countdown, changing the channel, cooling down,
+failed, or off. A four-step rail — **watch, wait, switch, verify** — shows how far
+an outage has progressed, and a pip meter counts the consecutive poll failures
+against the trigger. The hero foot keeps the battery state and the channel pair;
+router, allowed channels, cooldown, verification window and history sit behind
+one **Guardrails, router and history** details block.
+
+The opt-in switch and the 0–60 minute grace-period stepper are the only
+controls, and both call the existing guarded entities. Valid telemetry before the
+deadline cancels the channel change. The card never receives or displays router
+credentials or Wi-Fi passphrases.
 
 ## Cosy Octopus Battery Plan
 
-Register `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.33` as a JavaScript
+Register `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.34` as a JavaScript
 module and use `type: custom:aferiy-agile-plan-card`. Selecting Cosy Octopus in
 the integration selects the compact Cosy layout automatically.
 
@@ -110,7 +122,7 @@ adding the dashboard so the bundled card file is available.
 1. Go to **Settings → Dashboards**.
 2. Open the top-right three-dot menu and select **Resources**.
 3. Select **Add resource**.
-4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.33`.
+4. Enter `/aecc_battery_static/aferiy-agile-plan-card.js?v=1.8.34`.
 5. Select **JavaScript module** and save.
 6. Hard-refresh the browser. In the mobile app, fully close and reopen it.
 

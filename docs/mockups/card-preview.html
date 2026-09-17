@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AFERIY Wi-Fi loss recovery card · implementation preview</title>
+<!--
+  Development preview: loads the shipped card file directly and stubs the two
+  Home Assistant elements it uses (ha-card, ha-icon) so the real markup, CSS and
+  state mapping can be eyeballed in a plain browser. Nothing here ships.
+-->
+<style>
+  :root{
+    --primary-color:#4498c3; --success-color:#5d9e52; --warning-color:#d9a441; --error-color:#db5365;
+    --card-background-color:#1c1c1c; --ha-card-background:#1c1c1c; --secondary-background-color:#282828;
+    --primary-text-color:#e1e1e1; --secondary-text-color:#9b9b9b; --divider-color:#3a3a3a;
+    --text-primary-color:#ffffff; --ha-card-border-radius:20px; color-scheme:dark;
+  }
+  body{margin:0;padding:28px;background:#111;color:#e1e1e1;
+    font-family:Roboto,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+  h1{font-size:15px;font-weight:500;margin:0 0 4px}
+  p.lede{margin:0 0 24px;font-size:13px;color:#9b9b9b}
+  .grid{display:grid;gap:26px;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));align-items:start}
+  figure{margin:0;max-width:var(--card-width,430px)}
+  figcaption{margin-bottom:9px;font-size:12px;color:#9b9b9b}
+  ha-card{display:block;background:var(--ha-card-background);border-radius:var(--ha-card-border-radius);
+    box-shadow:var(--ha-card-box-shadow,0 2px 8px rgba(0,0,0,.28));overflow:hidden}
+  ha-icon{display:block}
+</style>
+</head>
+<body>
+<h1>aferiy-wifi-recovery-card.js · live preview</h1>
+<p class="lede">Rendered from the shipped card file with stub Home Assistant elements. States are fixtures, not live data.</p>
+<div class="grid" id="grid"></div>
+
+<script>
+/* ha-icon stub with the Material Design Icons the card requests. */
+const MDI = {
+  "mdi:wifi": "M12,21L15.6,16.2C14.6,15.45 13.35,15 12,15C10.65,15 9.4,15.45 8.4,16.2L12,21M12,3C7.95,3 4.21,4.34 1.2,6.6L3,9C5.5,7.12 8.62,6 12,6C15.38,6 18.5,7.12 21,9L22.8,6.6C19.79,4.34 16.05,3 12,3M12,9C9.3,9 6.81,9.89 4.8,11.4L6.6,13.8C8.1,12.67 9.97,12 12,12C14.03,12 15.9,12.67 17.4,13.8L19.2,11.4C17.19,9.89 14.7,9 12,9Z",
+  "mdi:wifi-off": "M2.28,3L1,4.27L2.47,5.74C2.04,6 1.61,6.29 1.2,6.6L3,9C3.53,8.6 4.08,8.25 4.66,7.93L6.89,10.16C6.15,10.5 5.44,10.91 4.8,11.4L6.6,13.8C7.38,13.22 8.26,12.77 9.2,12.47L11.75,15C10.5,15.07 9.34,15.5 8.4,16.2L12,21L14.46,17.73L17.74,21L19,19.72M12,3C9.85,3 7.8,3.38 5.9,4.07L8.29,6.47C9.5,6.16 10.72,6 12,6C15.38,6 18.5,7.11 21,9L22.8,6.6C19.79,4.34 16.06,3 12,3M12,9C11.62,9 11.25,9 10.88,9.05L14.07,12.25C15.29,12.53 16.43,13.07 17.4,13.8L19.2,11.4C17.2,9.89 14.7,9 12,9Z",
+  "mdi:clock-outline": "M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z",
+  "mdi:swap-horizontal": "M21,9L17,5V8H10V10H17V13M7,11L3,15L7,19V16H14V14H7V11Z",
+  "mdi:check-circle-outline": "M12 2C6.5 2 2 6.5 2 12S6.5 22 12 22 22 17.5 22 12 17.5 2 12 2M12 20C7.59 20 4 16.41 4 12S7.59 4 12 4 20 7.59 20 12 16.41 20 12 20M16.59 7.58L10 14.17L7.41 11.59L6 13L10 17L18 9L16.59 7.58Z",
+  "mdi:router-wireless": "M20.2,5.9L21,5.1C19.6,3.7 17.8,3 16,3C14.2,3 12.4,3.7 11,5.1L11.8,5.9C13,4.8 14.5,4.2 16,4.2C17.5,4.2 19,4.8 20.2,5.9M19.3,6.7C18.4,5.8 17.2,5.3 16,5.3C14.8,5.3 13.6,5.8 12.7,6.7L13.5,7.5C14.2,6.8 15.1,6.5 16,6.5C16.9,6.5 17.8,6.8 18.5,7.5L19.3,6.7M19,13H17V9H15V13H5A2,2 0 0,0 3,15V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V15A2,2 0 0,0 19,13M8,18H6V16H8V18M11.5,18H9.5V16H11.5V18M15,18H13V16H15V18Z",
+  "mdi:shield-alert-outline": "M21,11C21,16.55 17.16,21.74 12,23C6.84,21.74 3,16.55 3,11V5L12,1L21,5V11M12,21C15.75,20 19,15.54 19,11.22V6.3L12,3.18L5,6.3V11.22C5,15.54 8.25,20 12,21M11,7H13V13H11V7M11,15H13V17H11V15Z",
+  "mdi:alert-outline": "M12,2L1,21H23M12,6L19.53,19H4.47M11,10V14H13V10M11,16V18H13V16",
+  "mdi:shield-outline": "M21,11C21,16.55 17.16,21.74 12,23C6.84,21.74 3,16.55 3,11V5L12,1L21,5V11M12,21C15.75,20 19,15.54 19,11.22V6.3L12,3.18L5,6.3V11.22C5,15.54 8.25,20 12,21Z",
+};
+customElements.define("ha-icon", class extends HTMLElement {
+  static get observedAttributes() { return ["icon"]; }
+  constructor() { super(); this.attachShadow({ mode: "open" }); }
+  attributeChangedCallback() { this._draw(); }
+  connectedCallback() { this._draw(); }
+  _draw() {
+    const path = MDI[this.getAttribute("icon")] || MDI["mdi:wifi"];
+    // The sizing rule lives in this shadow root so the card's --mdc-icon-size
+    // (set inside the card's own shadow root) is inherited across the boundary.
+    this.shadowRoot.innerHTML = `<style>svg{width:var(--mdc-icon-size,24px);height:var(--mdc-icon-size,24px);fill:currentColor;display:block}</style>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"></path></svg>`;
+  }
+});
+window.customCards = [];
+</script>
+<script src="../../custom_components/aecc_battery/frontend/aferiy-wifi-recovery-card.js"></script>
+<script>
+const MINUTE = 60000;
+const at = (minutes) => new Date(Date.now() + minutes * MINUTE).toISOString();
+const base = {
+  configured: true, router_model: "Linksys MX4200", allowed_channels: [6, 11],
+  trigger_after_consecutive_failures: 6, current_consecutive_failures: 0, battery_available: true,
+  cooldown_hours: 1, grace_period_minutes: 6, grace_period_ends_at: null, last_attempt_at: null,
+  next_allowed_attempt_at: null, requested_channel: null, last_result: null,
+  last_battery_recovery_at: null, current_2_4ghz_channel: 6,
+  policy: "One 6/11 channel toggle per outage after the battery becomes unavailable.",
+};
+const monitoring = { ...base, status: "Monitoring", reason: "Waiting for the PS240 to become unavailable after sustained poll failures." };
+const FIXTURES = [
+  ["Monitoring · armed", "on", monitoring],
+  ["Grace period · live countdown", "on", { ...base, status: "Grace period", current_consecutive_failures: 6, battery_available: false, grace_period_ends_at: at(5.7) }],
+  ["Changing channel", "on", { ...base, status: "Changing channel", current_consecutive_failures: 6, battery_available: false, requested_channel: 11 }],
+  ["Recovered", "on", { ...base, status: "Recovered", current_2_4ghz_channel: 11, requested_channel: 11, last_result: "verified", last_attempt_at: at(-3), last_battery_recovery_at: at(-1.4) }],
+  ["Cooldown", "on", { ...base, status: "Cooldown", current_consecutive_failures: 6, battery_available: false, current_2_4ghz_channel: 11, requested_channel: 11, last_result: "verified", last_attempt_at: at(-18), next_allowed_attempt_at: at(41.6) }],
+  ["Failed", "on", { ...base, status: "Failed", current_consecutive_failures: 6, battery_available: false, requested_channel: 11, last_result: "failed", last_attempt_at: at(-9) }],
+  ["Recovery off", "off", { ...base, status: "Off", reason: "Wi-Fi loss recovery is off." }],
+  ["Router not configured", "off", { ...base, status: "Configuration required", configured: false, router_model: null, current_2_4ghz_channel: null, reason: "Add the Linksys router address and local administrator password in the integration options." }],
+];
+const requestedWidth = new URLSearchParams(location.search).get("width");
+if (requestedWidth) document.documentElement.style.setProperty("--card-width", `${Number(requestedWidth)}px`);
+const grid = document.getElementById("grid");
+for (const [label, switchState, attributes] of FIXTURES) {
+  const figure = document.createElement("figure");
+  const caption = document.createElement("figcaption");
+  caption.textContent = `${label} · status ${attributes.status}`;
+  const card = document.createElement("aferiy-wifi-recovery-card");
+  card.setConfig({});
+  card.hass = {
+    states: {
+      "switch.battery_wifi_loss_recovery": { entity_id: "switch.battery_wifi_loss_recovery", state: switchState, attributes },
+      "number.battery_wifi_recovery_grace_period": { entity_id: "number.battery_wifi_recovery_grace_period", state: String(attributes.grace_period_minutes), attributes: { min: 0, max: 60 } },
+    },
+    config: { time_zone: "Europe/London" },
+    callService: async () => {},
+  };
+  figure.append(caption, card);
+  grid.append(figure);
+}
+// The open details block is shown by default so the guardrails stay visible.
+setTimeout(() => {
+  document.querySelectorAll("aferiy-wifi-recovery-card").forEach((card) => {
+    if (!card._root.querySelector(".wr-more")) return;
+    card._root.querySelector("details.wr-more").open = true;
+  });
+}, 250);
+</script>
+</body>
+</html>
